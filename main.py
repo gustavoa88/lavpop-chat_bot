@@ -1,14 +1,15 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from dotenv import load_dotenv
 from openai import OpenAI
 from psycopg2.pool import ThreadedConnectionPool
 import psycopg2
 import psycopg2.extras
-import html
+import json
 import os
 import re
 import time
+import urllib.request
 from threading import Lock
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -21,6 +22,10 @@ app = FastAPI()
 # =========================================================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+META_WHATSAPP_TOKEN = os.getenv("META_WHATSAPP_TOKEN", "")
+META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "")
+META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "")
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
@@ -62,54 +67,23 @@ async def home():
     return {"status": "ok", "service": "lavpop-bot"}
 
 
-@app.post("/webhook")
-async def webhook(request: Request):
-    data = await request.form()
+@app.get("/webhook/meta")
+async def webhook_meta_verify(request: Request):
+    mode = request.query_params.get("hub.mode")
+    verify_token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
 
-    mensagem = (data.get("Body") or "").strip()
-    remetente = normalizar_telefone((data.get("From") or "").strip())
-    nome_contato = (data.get("ProfileName") or "").strip()
+    if mode == "subscribe" and verify_token == META_VERIFY_TOKEN and challenge:
+        return Response(content=challenge, media_type="text/plain")
 
-    print(f"Mensagem recebida de {remetente} ({nome_contato}): {mensagem}")
+    raise HTTPException(status_code=403, detail="Falha na verificação do webhook da Meta")
 
-    contexto = buscar_contexto_cliente(remetente)
-    print(f"CONTEXTO_CLIENTE: {contexto}")
 
-    resposta, origem, regra_nome, nome_intencao = gerar_resposta(
-        mensagem=mensagem,
-        contexto=contexto,
-        nome_contato=nome_contato,
-    )
-
-    if deve_salvar_log(mensagem):
-        print("LOG: Vai salvar")
-        salvar_log_conversa(
-            telefone=remetente,
-            nome_contato=nome_contato,
-            mensagem_cliente=mensagem,
-            resposta_bot=resposta,
-            origem_resposta=origem,
-            regra_nome=regra_nome,
-        )
-    else:
-        print("LOG: ignorado")
-
-    salvar_contexto_cliente(
-        telefone=remetente,
-        nome_contato=nome_contato,
-        nome_intencao=nome_intencao,
-        ultimo_assunto=regra_nome or nome_intencao,
-        ultima_resposta_tipo=definir_tipo_resposta(regra_nome, nome_intencao, resposta, origem),
-    )
-
-    resposta_xml = html.escape(resposta)
-
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>{resposta_xml}</Message>
-</Response>"""
-
-    return Response(content=twiml, media_type="text/xml")
+@app.post("/webhook/meta")
+async def webhook_meta(request: Request):
+    payload = await request.json()
+    processar_webhook_meta(payload)
+    return {"status": "ok"}
 
 
 # =========================================================
@@ -138,6 +112,96 @@ def normalizar_telefone(telefone: str) -> str:
     telefone = telefone.replace("whatsapp:", "")
     return telefone
 
+
+def enviar_mensagem_meta(destinatario: str, texto: str) -> None:
+    if not META_WHATSAPP_TOKEN or not META_PHONE_NUMBER_ID:
+        print("META: token ou phone_number_id não configurado")
+        return
+
+    url = f"https://graph.facebook.com/v23.0/{META_PHONE_NUMBER_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": destinatario,
+        "type": "text",
+        "text": {"body": texto},
+    }
+
+    req = urllib.request.Request(
+        url=url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {META_WHATSAPP_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status >= 300:
+                print(f"META: falha ao enviar mensagem ({response.status})")
+    except Exception as e:
+        print(f"META: erro ao enviar mensagem: {e}")
+
+
+def processar_webhook_meta(payload: Dict[str, Any]) -> None:
+    entries = payload.get("entry") or []
+
+    for entry in entries:
+        changes = entry.get("changes") or []
+        for change in changes:
+            value = change.get("value") or {}
+            messages = value.get("messages") or []
+            contacts = value.get("contacts") or []
+            nome_contato = ""
+            if contacts:
+                nome_contato = ((contacts[0].get("profile") or {}).get("name") or "").strip()
+
+            for mensagem_obj in messages:
+                tipo = (mensagem_obj.get("type") or "").strip()
+                remetente = normalizar_telefone((mensagem_obj.get("from") or "").strip())
+                mensagem = ""
+
+                if tipo == "text":
+                    mensagem = ((mensagem_obj.get("text") or {}).get("body") or "").strip()
+                elif tipo == "button":
+                    mensagem = ((mensagem_obj.get("button") or {}).get("text") or "").strip()
+                else:
+                    mensagem = ""
+
+                print(f"Mensagem recebida de {remetente} ({nome_contato}): {mensagem}")
+
+                contexto = buscar_contexto_cliente(remetente)
+                print(f"CONTEXTO_CLIENTE: {contexto}")
+
+                resposta, origem, regra_nome, nome_intencao = gerar_resposta(
+                    mensagem=mensagem,
+                    contexto=contexto,
+                    nome_contato=nome_contato,
+                )
+
+                if deve_salvar_log(mensagem):
+                    print("LOG: Vai salvar")
+                    salvar_log_conversa(
+                        telefone=remetente,
+                        nome_contato=nome_contato,
+                        mensagem_cliente=mensagem,
+                        resposta_bot=resposta,
+                        origem_resposta=origem,
+                        regra_nome=regra_nome,
+                    )
+                else:
+                    print("LOG: ignorado")
+
+                salvar_contexto_cliente(
+                    telefone=remetente,
+                    nome_contato=nome_contato,
+                    nome_intencao=nome_intencao,
+                    ultimo_assunto=regra_nome or nome_intencao,
+                    ultima_resposta_tipo=definir_tipo_resposta(regra_nome, nome_intencao, resposta, origem),
+                )
+
+                enviar_mensagem_meta(remetente, resposta)
 
 def texto_contem_termo(msg_normalizada: str, termo_normalizado: str) -> bool:
     if not termo_normalizado:
@@ -423,6 +487,7 @@ def carregar_regras_db() -> List[Dict[str, Any]]:
     for sql in consultas:
         conn = None
         cursor = None
+        conexao_invalida = False
         try:
             conn = get_db_connection()
             cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -430,14 +495,10 @@ def carregar_regras_db() -> List[Dict[str, Any]]:
             return cursor.fetchall() or []
         except Exception as e:
             ultimo_erro = e
+            conexao_invalida = True
             if cursor:
                 try:
                     cursor.close()
-                except Exception:
-                    pass
-            if conn:
-                try:
-                    put_db_connection(conn, close=True)
                 except Exception:
                     pass
         finally:
@@ -448,7 +509,7 @@ def carregar_regras_db() -> List[Dict[str, Any]]:
                     pass
             if conn:
                 try:
-                    put_db_connection(conn)
+                    put_db_connection(conn, close=conexao_invalida)
                 except Exception:
                     pass
 
@@ -939,6 +1000,13 @@ def gerar_resposta(
     contexto: Optional[Dict[str, Any]] = None,
     nome_contato: str = "",
 ) -> Tuple[str, str, Optional[str], Optional[str]]:
+    if not mensagem or not mensagem.strip():
+        resposta_vazia = (
+            "Opa! 😊 Pode me mandar sua dúvida com um pouquinho mais de detalhe? "
+            "Assim eu te ajudo melhor."
+        )
+        return resposta_vazia, "fluxo", "mensagem_vazia", "mensagem_vazia"
+
     regra_obj, nome_regra, nome_intencao = buscar_regra(mensagem)
 
     if regra_obj:

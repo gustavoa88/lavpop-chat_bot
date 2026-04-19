@@ -118,3 +118,16 @@ Checklist:
 - Garantir permissões necessárias (ex.: `whatsapp_business_messaging`).
 - Validar se `META_PHONE_NUMBER_ID` corresponde ao número configurado no app da Meta.
 - Reiniciar a API após atualizar `.env`.
+
+## 10) Testes automatizados
+
+Para validar a assinatura HMAC do webhook e evitar regressões em futuras alterações:
+
+```bash
+pytest tests/test_hmac_signature_validation.py
+```
+
+Cenários cobertos:
+- assinatura válida (aceita)
+- assinatura inválida (403)
+- modo compatibilidade com `META_APP_SECRET` ausente (não bloqueia)

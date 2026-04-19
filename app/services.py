@@ -27,37 +27,57 @@ PROACTIVE_MENU_MESSAGE = (
 )
 
 PROACTIVE_MENU_OPTIONS = {
-    "1": (
-        "🕒 *Horário de atendimento*\n"
-        "Segunda a sexta: 8h às 18h\n"
-        "Sábado: 8h às 12h\n"
-        "Domingo e feriados: fechado."
-    ),
-    "2": (
-        "💰 *Preços*\n"
-        "Os valores variam por tipo de peça e serviço.\n"
-        "Se quiser, te passo um orçamento rápido: me diga quais peças você precisa lavar."
-    ),
-    "3": (
-        "🧺 *Como funciona*\n"
-        "1) Você envia o pedido\n"
-        "2) Coletamos as peças\n"
-        "3) Lavamos e finalizamos\n"
-        "4) Entregamos para você.\n"
-        "Se quiser, já te explico como agendar."
-    ),
-    "4": (
-        "✅ *Serviços disponíveis*\n"
-        "- Lavagem de roupas do dia a dia\n"
-        "- Peças delicadas\n"
-        "- Edredons e cobertores\n"
-        "- Passadoria\n"
-        "- Coleta e entrega (sob consulta de região)"
-    ),
-    "5": (
-        "🤝 *Atendimento humano*\n"
-        "Perfeito! Vou encaminhar seu atendimento para nossa equipe humana."
-    ),
+    "1": {
+        "intent": "menu_opcao_1",
+        "lookup_terms": ["horario de atendimento", "horario de funcionamento", "funcionamento"],
+        "fallback": (
+            "🕒 *Horário de atendimento*\n"
+            "Segunda a sexta: 8h às 18h\n"
+            "Sábado: 8h às 12h\n"
+            "Domingo e feriados: fechado."
+        ),
+    },
+    "2": {
+        "intent": "menu_opcao_2",
+        "lookup_terms": ["preco", "precos", "tabela de precos"],
+        "fallback": (
+            "💰 *Preços*\n"
+            "Os valores variam por tipo de peça e serviço.\n"
+            "Se quiser, te passo um orçamento rápido: me diga quais peças você precisa lavar."
+        ),
+    },
+    "3": {
+        "intent": "menu_opcao_3",
+        "lookup_terms": ["como funciona", "funcionamento", "processo"],
+        "fallback": (
+            "🧺 *Como funciona*\n"
+            "1) Você envia o pedido\n"
+            "2) Coletamos as peças\n"
+            "3) Lavamos e finalizamos\n"
+            "4) Entregamos para você.\n"
+            "Se quiser, já te explico como agendar."
+        ),
+    },
+    "4": {
+        "intent": "menu_opcao_4",
+        "lookup_terms": ["servicos", "tipos de servico", "o que voces fazem"],
+        "fallback": (
+            "✅ *Serviços disponíveis*\n"
+            "- Lavagem de roupas do dia a dia\n"
+            "- Peças delicadas\n"
+            "- Edredons e cobertores\n"
+            "- Passadoria\n"
+            "- Coleta e entrega (sob consulta de região)"
+        ),
+    },
+    "5": {
+        "intent": "menu_opcao_5",
+        "lookup_terms": ["atendimento humano", "falar com atendente", "suporte humano"],
+        "fallback": (
+            "🤝 *Atendimento humano*\n"
+            "Perfeito! Vou encaminhar seu atendimento para nossa equipe humana."
+        ),
+    },
 }
 
 
@@ -182,13 +202,21 @@ class ChatService:
         }
         return msg_norm in simple_greetings
 
-    def proactive_menu_option_response(self, message: str) -> tuple[Optional[str], Optional[str]]:
+    def proactive_menu_option_response(
+        self, message: str
+    ) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         msg_norm = normalize_text(message)
         msg_norm = re.sub(r"[!?.,:;\\s]+", "", msg_norm).strip()
-        response = PROACTIVE_MENU_OPTIONS.get(msg_norm)
-        if not response:
-            return None, None
-        return response, f"menu_opcao_{msg_norm}"
+        option = PROACTIVE_MENU_OPTIONS.get(msg_norm)
+        if not option:
+            return None, None, None, None
+
+        for term in option["lookup_terms"]:
+            db_answer, rule_name = self.find_rule_response(term)
+            if db_answer:
+                return db_answer, option["intent"], rule_name, "banco"
+
+        return option["fallback"], option["intent"], None, "menu"
 
     def ai_response(self, message: str, customer_name: str, context: Optional[dict]) -> str:
         if not self.client:
@@ -416,12 +444,15 @@ class ChatService:
             response_type = "menu_boas_vindas"
             intent = "menu_inicial"
         else:
-            option_response, option_intent = self.proactive_menu_option_response(message)
+            option_response, option_intent, option_rule_name, option_source = self.proactive_menu_option_response(
+                message
+            )
             if option_response:
                 response = option_response
-                source = "menu"
-                response_type = "menu_opcao"
+                source = option_source or "menu"
+                response_type = f"menu_opcao_{source}"
                 intent = option_intent
+                rule_name = option_rule_name
             else:
                 rule_answer, rule_name = self.find_rule_response(message)
                 intent = self.classify_intent(message)

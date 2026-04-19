@@ -100,6 +100,7 @@ No painel da Meta, configure:
 6. Se não achar regra, usa OpenAI (`OPENAI_MODEL`).
 7. Salva `chatbot.log_conversas` e atualiza `chatbot.contexto_cliente`.
 8. Envia resposta para o usuário via Graph API da Meta.
+9. Aplica idempotência por mensagem do webhook (deduplicação por `messages[].id` com fallback por hash), evitando resposta duplicada em reentregas da Meta.
 
 ## 8) Próximos passos recomendados
 

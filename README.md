@@ -104,7 +104,7 @@ No painel da Meta, configure:
 
 ## 8) Próximos passos recomendados
 
-- Adicionar testes automatizados (pytest).
+- Evoluir suíte de testes automatizados (pytest) com cenários de integração reais em PostgreSQL.
 - Criar endpoint de observabilidade (métricas/health DB).
 - Criar painel administrativo para manter FAQ e intenções.
 

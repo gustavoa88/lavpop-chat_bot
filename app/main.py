@@ -13,9 +13,9 @@ from app.config import load_settings
 from app.db import Database
 from app.services import (
     ChatService,
-    INTERACTIVE_MENU_ID_TO_OPTION,
     PROACTIVE_MENU_MESSAGE,
     normalize_phone,
+    resolve_interactive_menu_selection,
 )
 
 load_dotenv()
@@ -283,9 +283,10 @@ async def _process_meta_webhook(request: Request) -> dict:
                         interactive_type = (interactive_obj.get("type") or "").strip().lower()
                         if interactive_type == "list_reply":
                             list_reply = interactive_obj.get("list_reply") or {}
-                            interactive_id = (list_reply.get("id") or "").strip()
-                            incoming_text = INTERACTIVE_MENU_ID_TO_OPTION.get(
-                                interactive_id, (list_reply.get("title") or "").strip()
+                            incoming_text = resolve_interactive_menu_selection(
+                                interactive_id=(list_reply.get("id") or "").strip(),
+                                interactive_title=(list_reply.get("title") or "").strip(),
+                                interactive_description=(list_reply.get("description") or "").strip(),
                             )
                         elif interactive_type == "button_reply":
                             button_reply = interactive_obj.get("button_reply") or {}

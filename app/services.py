@@ -116,6 +116,14 @@ INTERACTIVE_MENU_ID_TO_OPTION = {
     "menu_option_5": "5",
 }
 
+INTERACTIVE_MENU_TITLE_TO_OPTION = {
+    "1 horario de atendimento": "1",
+    "2 precos": "2",
+    "3 como funciona": "3",
+    "4 servicos disponiveis": "4",
+    "5 atendimento humano": "5",
+}
+
 
 def _extract_menu_option_token(message: str) -> str:
     msg_norm = normalize_text(message)
@@ -164,6 +172,33 @@ def normalize_text(text: str) -> str:
 
 def normalize_phone(phone: str) -> str:
     return (phone or "").replace("whatsapp:", "").strip()
+
+
+def extract_menu_option(message: str) -> Optional[str]:
+    normalized = normalize_text(message)
+    match = re.search(r"\b([1-5])\b", normalized)
+    if match:
+        return match.group(1)
+    compact = re.sub(r"[!?.,:;\\s]+", "", normalized).strip()
+    return compact if compact in PROACTIVE_MENU_OPTIONS else None
+
+
+def resolve_interactive_menu_selection(
+    interactive_id: str,
+    interactive_title: str,
+    interactive_description: str = "",
+) -> str:
+    normalized_title = normalize_text(interactive_title)
+    if interactive_id in INTERACTIVE_MENU_ID_TO_OPTION:
+        return INTERACTIVE_MENU_ID_TO_OPTION[interactive_id]
+    if normalized_title in INTERACTIVE_MENU_TITLE_TO_OPTION:
+        return INTERACTIVE_MENU_TITLE_TO_OPTION[normalized_title]
+
+    extracted = extract_menu_option(interactive_title) or extract_menu_option(interactive_description)
+    if extracted:
+        return extracted
+
+    return (interactive_title or "").strip()
 
 
 def _http_error_body(exc: HTTPError) -> str:

@@ -1,5 +1,10 @@
 from app.config import Settings
-from app.services import ChatService, PROACTIVE_MENU_MESSAGE, PROACTIVE_MENU_OPTIONS
+from app.services import (
+    ChatService,
+    PROACTIVE_MENU_MESSAGE,
+    PROACTIVE_MENU_OPTIONS,
+    PROACTIVE_MENU_ROWS,
+)
 
 
 class FakeDatabase:
@@ -127,3 +132,8 @@ def test_answer_message_accepts_interactive_list_plain_title_as_option():
     assert source == "menu"
     assert rule_name is None
     assert intent == "menu_opcao_4"
+
+
+def test_interactive_list_rows_respect_whatsapp_title_limit():
+    for row in PROACTIVE_MENU_ROWS:
+        assert len(row["title"]) <= 24

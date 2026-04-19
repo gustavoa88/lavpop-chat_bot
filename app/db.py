@@ -155,6 +155,15 @@ class Database:
                 )
                 self._dedup_table_warning_logged = True
             return True
+        except psycopg2.errors.UndefinedColumn:
+            if not self._dedup_table_warning_logged:
+                logger.warning(
+                    "Estrutura da tabela de deduplicação incompatível "
+                    "(coluna esperada ausente em chatbot.webhook_event_dedup). "
+                    "Prosseguindo sem idempotência até aplicar db/schema.sql."
+                )
+                self._dedup_table_warning_logged = True
+            return True
 
     def is_ready(self) -> bool:
         try:

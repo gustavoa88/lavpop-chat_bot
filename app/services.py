@@ -15,6 +15,17 @@ from app.db import Database
 
 logger = logging.getLogger("meta_chatbot")
 
+PROACTIVE_MENU_MESSAGE = (
+    "Olá! 👋 Que bom falar com você.\n"
+    "Posso te ajudar com:\n"
+    "1) Horário de atendimento\n"
+    "2) Preços\n"
+    "3) Como funciona\n"
+    "4) Serviços disponíveis\n"
+    "5) Falar com atendimento humano\n\n"
+    "Me diga o número da opção ou escreva o tema 🙂"
+)
+
 
 def normalize_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -122,6 +133,20 @@ class ChatService:
             if intent_name and intent_name.replace("_", " ") in message_norm:
                 return intent_name
         return None
+
+    def is_proactive_greeting(self, message: str) -> bool:
+        msg_norm = normalize_text(message)
+        msg_norm = re.sub(r"[!?.,:;]+", "", msg_norm).strip()
+        simple_greetings = {
+            "oi",
+            "ola",
+            "bom dia",
+            "boa tarde",
+            "boa noite",
+            "e ai",
+            "ei",
+        }
+        return msg_norm in simple_greetings
 
     def ai_response(self, message: str, customer_name: str, context: Optional[dict]) -> str:
         if not self.client:
@@ -342,17 +367,24 @@ class ChatService:
 
     def answer_message(self, phone: str, name: str, message: str) -> tuple[str, str, Optional[str], Optional[str]]:
         context = self.get_customer_context(phone)
-        rule_answer, rule_name = self.find_rule_response(message)
-        intent = self.classify_intent(message)
-
-        if rule_answer:
-            response = rule_answer
-            source = "banco"
-            response_type = f"regra_{rule_name}"
+        rule_name = None
+        if self.is_proactive_greeting(message):
+            response = PROACTIVE_MENU_MESSAGE
+            source = "menu"
+            response_type = "menu_boas_vindas"
+            intent = "menu_inicial"
         else:
-            response = self.ai_response(message, name, context)
-            source = "ia"
-            response_type = "ia"
+            rule_answer, rule_name = self.find_rule_response(message)
+            intent = self.classify_intent(message)
+
+            if rule_answer:
+                response = rule_answer
+                source = "banco"
+                response_type = f"regra_{rule_name}"
+            else:
+                response = self.ai_response(message, name, context)
+                source = "ia"
+                response_type = "ia"
 
         self.save_log(phone, name, message, response, source, rule_name)
         self.save_context(phone, name, intent, rule_name or intent, response_type)

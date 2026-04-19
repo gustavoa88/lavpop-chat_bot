@@ -11,6 +11,7 @@ class Settings:
     meta_phone_number_id: str
     meta_app_secret: str
     meta_validate_signature: bool
+    meta_require_app_secret: bool
     db_host: str
     db_port: int
     db_name: str
@@ -28,6 +29,12 @@ def load_settings() -> Settings:
         "yes",
         "on",
     }
+    require_app_secret = os.getenv("META_REQUIRE_APP_SECRET", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -37,6 +44,7 @@ def load_settings() -> Settings:
         meta_phone_number_id=os.getenv("META_PHONE_NUMBER_ID", ""),
         meta_app_secret=os.getenv("META_APP_SECRET", ""),
         meta_validate_signature=validate_signature,
+        meta_require_app_secret=require_app_secret,
         db_host=os.getenv("DB_HOST", "127.0.0.1"),
         db_port=int(os.getenv("DB_PORT", "5432")),
         db_name=os.getenv("DB_NAME", "lavpop_chatbot"),

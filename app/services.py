@@ -1,12 +1,17 @@
 import json
+import logging
 import re
+import time
 import urllib.request
+from urllib.error import HTTPError, URLError
 from typing import Any, Optional
 
 from openai import OpenAI
 
 from app.config import Settings
 from app.db import Database
+
+logger = logging.getLogger("meta_chatbot")
 
 
 def normalize_text(text: str) -> str:
@@ -88,19 +93,49 @@ class ChatService:
 
         context_prompt = f"Contexto cliente: {json.dumps(context or {}, ensure_ascii=False)}"
 
-        completion = self.client.responses.create(
-            model=self.settings.openai_model,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "system", "content": context_prompt},
-                {
-                    "role": "user",
-                    "content": f"Nome do cliente: {customer_name or 'Cliente'}\nMensagem: {message}",
-                },
-            ],
-            max_output_tokens=220,
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                completion = self.client.responses.create(
+                    model=self.settings.openai_model,
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": context_prompt},
+                        {
+                            "role": "user",
+                            "content": f"Nome do cliente: {customer_name or 'Cliente'}\nMensagem: {message}",
+                        },
+                    ],
+                    max_output_tokens=220,
+                )
+                return completion.output_text.strip()
+            except Exception as exc:
+                status_code = getattr(exc, "status_code", None)
+                retryable = status_code in {408, 409, 429} or (isinstance(status_code, int) and status_code >= 500)
+                if attempt < max_attempts and retryable:
+                    wait_seconds = 0.5 * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Falha transitória ao consultar OpenAI. tentativa=%s/%s status_code=%s erro=%s",
+                        attempt,
+                        max_attempts,
+                        status_code,
+                        exc,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
+                logger.exception(
+                    "Falha ao gerar resposta com OpenAI. tentativa=%s/%s status_code=%s",
+                    attempt,
+                    max_attempts,
+                    status_code,
+                )
+                break
+
+        return (
+            "Estou com instabilidade no atendimento automático agora. "
+            "Posso te ajudar com horário, preço e serviços, ou encaminhar para atendimento humano 🙂"
         )
-        return completion.output_text.strip()
 
     def save_context(
         self,
@@ -176,8 +211,52 @@ class ChatService:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10):
-            return
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=10):
+                    return
+            except HTTPError as exc:
+                retryable = exc.code in {408, 409, 429} or exc.code >= 500
+                if attempt < max_attempts and retryable:
+                    wait_seconds = 0.5 * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Falha transitória ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s",
+                        attempt,
+                        max_attempts,
+                        exc.code,
+                        destination,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+                logger.exception(
+                    "Falha HTTP ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s",
+                    attempt,
+                    max_attempts,
+                    exc.code,
+                    destination,
+                )
+                return
+            except (URLError, TimeoutError) as exc:
+                if attempt < max_attempts:
+                    wait_seconds = 0.5 * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Falha de rede ao enviar mensagem Meta. tentativa=%s/%s destino=%s erro=%s",
+                        attempt,
+                        max_attempts,
+                        destination,
+                        exc,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+                logger.exception(
+                    "Falha de rede final ao enviar mensagem Meta. tentativa=%s/%s destino=%s",
+                    attempt,
+                    max_attempts,
+                    destination,
+                )
+                return
 
     def answer_message(self, phone: str, name: str, message: str) -> tuple[str, str, Optional[str], Optional[str]]:
         context = self.get_customer_context(phone)

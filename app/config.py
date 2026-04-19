@@ -20,6 +20,8 @@ class Settings:
     db_min_conn: int
     db_max_conn: int
     db_connect_timeout: int
+    inactivity_timeout_minutes: int
+    inactivity_check_interval_seconds: int
 
 
 def load_settings() -> Settings:
@@ -53,4 +55,6 @@ def load_settings() -> Settings:
         db_min_conn=int(os.getenv("DB_MIN_CONN", "1")),
         db_max_conn=int(os.getenv("DB_MAX_CONN", "5")),
         db_connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT", "3")),
+        inactivity_timeout_minutes=int(os.getenv("INACTIVITY_TIMEOUT_MINUTES", "15")),
+        inactivity_check_interval_seconds=int(os.getenv("INACTIVITY_CHECK_INTERVAL_SECONDS", "60")),
     )

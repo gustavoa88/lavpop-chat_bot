@@ -49,6 +49,8 @@ def _build_service(rules=None, intents=None) -> ChatService:
         db_min_conn=1,
         db_max_conn=5,
         db_connect_timeout=3,
+        inactivity_timeout_minutes=15,
+        inactivity_check_interval_seconds=60,
     )
     return ChatService(FakeDatabase(rules=rules, intents=intents), settings)
 
@@ -100,3 +102,53 @@ def test_resolve_interactive_menu_selection_accepts_known_title():
         interactive_title="2) Preços",
     )
     assert selection == "2"
+
+
+def test_close_inactive_conversations_sends_message_and_updates_status(monkeypatch):
+    class FakeDbInactivity:
+        def __init__(self):
+            self.executed = []
+            self.logged = []
+
+        def fetchall(self, query, params=()):
+            if "FROM chatbot.contexto_cliente" in query:
+                return [{"telefone": "5511999999999", "nome": "Cliente Teste"}]
+            return []
+
+        def fetchone(self, query, params=()):
+            return None
+
+        def execute(self, query, params=()):
+            if "INSERT INTO chatbot.log_conversas" in query:
+                self.logged.append(params)
+            else:
+                self.executed.append((query, params))
+
+    settings = DummySettings(
+        openai_api_key="",
+        openai_model="gpt-4.1-mini",
+        meta_verify_token="verify-token",
+        meta_whatsapp_token="token",
+        meta_phone_number_id="phone-id",
+        meta_app_secret="",
+        meta_validate_signature=True,
+        meta_require_app_secret=False,
+        db_host="127.0.0.1",
+        db_port=5432,
+        db_name="lavpop_chatbot",
+        db_user="postgres",
+        db_password="postgres",
+        db_min_conn=1,
+        db_max_conn=5,
+        db_connect_timeout=3,
+        inactivity_timeout_minutes=15,
+        inactivity_check_interval_seconds=60,
+    )
+    service = ChatService(FakeDbInactivity(), settings)
+    monkeypatch.setattr(service, "send_meta_message", lambda destination, text: True)
+
+    closed = service.close_inactive_conversations()
+
+    assert closed == 1
+    assert len(service.db.logged) == 1
+    assert any("encerrado_inatividade" in call[0] for call in service.db.executed)

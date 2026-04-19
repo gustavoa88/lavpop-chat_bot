@@ -143,6 +143,8 @@ def _build_settings() -> Settings:
         db_min_conn=1,
         db_max_conn=5,
         db_connect_timeout=3,
+        inactivity_timeout_minutes=15,
+        inactivity_check_interval_seconds=60,
     )
 
 

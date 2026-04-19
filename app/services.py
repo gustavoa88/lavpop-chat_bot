@@ -26,6 +26,12 @@ PROACTIVE_MENU_MESSAGE = (
     "Me diga o número da opção ou escreva o tema 🙂"
 )
 
+INACTIVITY_CLOSING_MESSAGE = (
+    "Percebi que ficamos alguns minutinhos sem interação 🙂\n"
+    "Vou encerrar este atendimento por enquanto, tudo bem?\n"
+    "Quando quiser, é só me chamar novamente — vai ser um prazer te receber na LavPop! 🧺💙"
+)
+
 PROACTIVE_MENU_OPTIONS = {
     "1": {
         "intent": "menu_opcao_1",
@@ -430,6 +436,60 @@ class ChatService:
             (phone, name, intent, subject, response_type),
         )
 
+    def list_inactive_active_customers(self, timeout_minutes: int, limit: int = 50) -> list[dict]:
+        return self.db.fetchall(
+            """
+            SELECT telefone, COALESCE(nome, '') AS nome
+              FROM chatbot.contexto_cliente
+             WHERE status = 'ativo'
+               AND ultima_interacao <= NOW() - make_interval(mins => %s)
+             ORDER BY ultima_interacao ASC
+             LIMIT %s
+            """,
+            (timeout_minutes, limit),
+        )
+
+    def mark_context_closed_for_inactivity(self, phone: str) -> None:
+        self.db.execute(
+            """
+            UPDATE chatbot.contexto_cliente
+               SET status = 'encerrado_inatividade',
+                   updated_at = NOW()
+             WHERE telefone = %s
+               AND status = 'ativo'
+            """,
+            (phone,),
+        )
+
+    def close_inactive_conversations(self) -> int:
+        closed_count = 0
+        contacts = self.list_inactive_active_customers(
+            timeout_minutes=self.settings.inactivity_timeout_minutes,
+            limit=100,
+        )
+        for contact in contacts:
+            phone = (contact.get("telefone") or "").strip()
+            if not phone:
+                continue
+
+            sent = self.send_meta_message(phone, INACTIVITY_CLOSING_MESSAGE)
+            if not sent:
+                continue
+
+            name = (contact.get("nome") or "").strip()
+            self.save_log(
+                phone=phone,
+                name=name,
+                client_msg="[sistema] encerramento por inatividade",
+                bot_msg=INACTIVITY_CLOSING_MESSAGE,
+                source="automacao",
+                rule_name="encerramento_inatividade",
+            )
+            self.mark_context_closed_for_inactivity(phone)
+            closed_count += 1
+
+        return closed_count
+
     def get_customer_context(self, phone: str) -> Optional[dict]:
         return self.db.fetchone(
             "SELECT * FROM chatbot.contexto_cliente WHERE telefone = %s",
@@ -455,14 +515,14 @@ class ChatService:
             (phone, name, client_msg, bot_msg, source, rule_name),
         )
 
-    def send_meta_message(self, destination: str, text: str) -> None:
+    def send_meta_message(self, destination: str, text: str) -> bool:
         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
             logger.error(
                 "Envio para Meta ignorado por configuração ausente. token=%s phone_number_id=%s",
                 _token_hint(self.settings.meta_whatsapp_token),
                 "ok" if self.settings.meta_phone_number_id else "ausente",
             )
-            return
+            return False
 
         now = time.time()
         if now < self._meta_send_blocked_until:
@@ -470,7 +530,7 @@ class ChatService:
                 "Envio para Meta temporariamente desabilitado por erro de autenticação anterior. destino=%s",
                 destination,
             )
-            return
+            return False
 
         url = f"https://graph.facebook.com/v23.0/{self.settings.meta_phone_number_id}/messages"
         payload = {
@@ -495,7 +555,7 @@ class ChatService:
             try:
                 with urllib.request.urlopen(req, timeout=10):
                     logger.info("Mensagem enviada com sucesso para %s", destination)
-                    return
+                    return True
 
             except HTTPError as exc:
                 details = _http_error_body(exc)
@@ -530,7 +590,7 @@ class ChatService:
                     destination,
                     details or "-",
                 )
-                return
+                return False
 
             except (URLError, TimeoutError) as exc:
                 if attempt < max_attempts:
@@ -552,7 +612,7 @@ class ChatService:
                     destination,
                     exc,
                 )
-                return
+                return False
 
     def send_meta_menu_message(self, destination: str) -> bool:
         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:

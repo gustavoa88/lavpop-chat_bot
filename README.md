@@ -71,7 +71,12 @@ Health check:
 
 ```bash
 curl http://localhost:8000/
+curl http://localhost:8000/health/live
+curl http://localhost:8000/health/ready
 ```
+
+- `GET /health/live`: confirma que o processo da API está ativo.
+- `GET /health/ready`: valida prontidão real consultando o banco (`SELECT 1`).
 
 ## 6) Webhook da Meta
 

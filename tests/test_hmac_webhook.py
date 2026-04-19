@@ -115,3 +115,36 @@ def test_startup_fails_in_strict_mode_without_app_secret(monkeypatch):
     with pytest.raises(RuntimeError, match="META_APP_SECRET é obrigatório"):
         with TestClient(main_module.app):
             pass
+
+
+def test_health_live_returns_alive(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.is_ready = lambda: True
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/health/live")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "alive"
+
+
+def test_health_ready_returns_ok_when_database_is_ready(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.is_ready = lambda: True
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "dependencies": {"database": "ok"}}
+
+
+def test_health_ready_returns_503_when_database_is_unavailable(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.is_ready = lambda: False
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Banco de dados indisponível"

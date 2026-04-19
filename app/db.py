@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import logging
 from typing import Any, Iterator, Optional
 
 import psycopg2
@@ -7,11 +8,14 @@ from psycopg2.pool import ThreadedConnectionPool
 
 from app.config import Settings
 
+logger = logging.getLogger("meta_chatbot")
+
 
 class Database:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._pool: Optional[ThreadedConnectionPool] = None
+        self._dedup_table_warning_logged = False
 
     def start(self) -> None:
         if self._pool is not None:
@@ -69,21 +73,31 @@ class Database:
         payload_hash: str,
         source: str = "meta_webhook",
     ) -> bool:
-        with self.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO chatbot.webhook_event_dedup (
-                        event_key, payload_hash, source, processed_at
-                    ) VALUES (%s, %s, %s, NOW())
-                    ON CONFLICT (event_key) DO NOTHING
-                    RETURNING event_key
-                    """,
-                    (event_key, payload_hash, source),
+        try:
+            with self.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO chatbot.webhook_event_dedup (
+                            event_key, payload_hash, source, processed_at
+                        ) VALUES (%s, %s, %s, NOW())
+                        ON CONFLICT (event_key) DO NOTHING
+                        RETURNING event_key
+                        """,
+                        (event_key, payload_hash, source),
+                    )
+                    inserted = cur.fetchone() is not None
+                conn.commit()
+            return inserted
+        except psycopg2.errors.UndefinedTable:
+            if not self._dedup_table_warning_logged:
+                logger.warning(
+                    "Tabela de deduplicação do webhook não encontrada "
+                    "(chatbot.webhook_event_dedup). "
+                    "Prosseguindo sem idempotência até aplicar db/schema.sql."
                 )
-                inserted = cur.fetchone() is not None
-            conn.commit()
-        return inserted
+                self._dedup_table_warning_logged = True
+            return True
 
     def is_ready(self) -> bool:
         try:

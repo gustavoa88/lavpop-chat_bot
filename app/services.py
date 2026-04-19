@@ -81,11 +81,31 @@ PROACTIVE_MENU_OPTIONS = {
 }
 
 PROACTIVE_MENU_ROWS = [
-    {"id": "menu_option_1", "title": "1) Horário de atendimento"},
-    {"id": "menu_option_2", "title": "2) Preços"},
-    {"id": "menu_option_3", "title": "3) Como funciona"},
-    {"id": "menu_option_4", "title": "4) Serviços disponíveis"},
-    {"id": "menu_option_5", "title": "5) Atendimento humano"},
+    {
+        "id": "menu_option_1",
+        "title": "1) Horário de atendimento",
+        "description": "Dias e horários de funcionamento.",
+    },
+    {
+        "id": "menu_option_2",
+        "title": "2) Preços",
+        "description": "Orçamento e faixa de valores.",
+    },
+    {
+        "id": "menu_option_3",
+        "title": "3) Como funciona",
+        "description": "Entenda o passo a passo.",
+    },
+    {
+        "id": "menu_option_4",
+        "title": "4) Serviços disponíveis",
+        "description": "Veja tudo que a LavPop faz.",
+    },
+    {
+        "id": "menu_option_5",
+        "title": "5) Atendimento humano",
+        "description": "Falar com um atendente agora.",
+    },
 ]
 
 INTERACTIVE_MENU_ID_TO_OPTION = {
@@ -95,6 +115,29 @@ INTERACTIVE_MENU_ID_TO_OPTION = {
     "menu_option_4": "4",
     "menu_option_5": "5",
 }
+
+
+def _extract_menu_option_token(message: str) -> str:
+    msg_norm = normalize_text(message)
+    compact = re.sub(r"\s+", " ", msg_norm).strip()
+    if not compact:
+        return ""
+
+    numeric_match = re.match(r"^(\d)", compact)
+    if numeric_match:
+        return numeric_match.group(1)
+
+    compact_no_punct = re.sub(r"[^\w\s]", " ", compact)
+    compact_no_punct = re.sub(r"\s+", " ", compact_no_punct).strip()
+
+    title_to_option = {
+        "horario de atendimento": "1",
+        "precos": "2",
+        "como funciona": "3",
+        "servicos disponiveis": "4",
+        "atendimento humano": "5",
+    }
+    return title_to_option.get(compact_no_punct, "")
 
 
 def normalize_text(text: str) -> str:
@@ -221,9 +264,8 @@ class ChatService:
     def proactive_menu_option_response(
         self, message: str
     ) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-        msg_norm = normalize_text(message)
-        msg_norm = re.sub(r"[!?.,:;\\s]+", "", msg_norm).strip()
-        option = PROACTIVE_MENU_OPTIONS.get(msg_norm)
+        option_key = _extract_menu_option_token(message)
+        option = PROACTIVE_MENU_OPTIONS.get(option_key)
         if not option:
             return None, None, None, None
 
@@ -479,7 +521,7 @@ class ChatService:
                 "body": {"text": "Sobre o que você precisa de ajuda?"},
                 "footer": {"text": "Escreva uma frase curta ou escolha uma opção na lista."},
                 "action": {
-                    "button": "Opções",
+                    "button": "Ver opções",
                     "sections": [
                         {
                             "title": "Atendimento LavPop",

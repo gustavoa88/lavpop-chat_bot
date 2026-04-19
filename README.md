@@ -88,3 +88,15 @@ No painel da Meta, configure:
 - Implementar assinatura HMAC de webhook para segurança avançada.
 - Criar endpoint de observabilidade (métricas/health DB).
 - Criar painel administrativo para manter FAQ e intenções.
+
+## 9) Troubleshooting rápido (erro 401 da Meta)
+
+Se o log mostrar `Authentication Error` com `code=190` ao enviar mensagem, o webhook está chegando,
+mas o token de envio para Graph API falhou na autenticação.
+
+Checklist:
+- Confirmar se `META_WHATSAPP_TOKEN` é token de acesso válido do app/WhatsApp Cloud API (não é o `META_VERIFY_TOKEN`).
+- Gerar novo token se o atual for temporário/expirado.
+- Garantir permissões necessárias (ex.: `whatsapp_business_messaging`).
+- Validar se `META_PHONE_NUMBER_ID` corresponde ao número configurado no app da Meta.
+- Reiniciar a API após atualizar `.env`.

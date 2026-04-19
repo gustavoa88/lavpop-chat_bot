@@ -50,6 +50,17 @@ def _http_error_body(exc: HTTPError) -> str:
     return raw.decode("utf-8", errors="replace").strip()
 
 
+def _token_hint(token: str) -> str:
+    token = (token or "").strip()
+    if not token:
+        return "ausente"
+    if len(token) < 20:
+        return "muito_curto"
+    if token.startswith("EA"):
+        return "formato_esperado"
+    return "formato_desconhecido"
+
+
 class ChatService:
     def __init__(self, db: Database, settings: Settings):
         self.db = db
@@ -208,6 +219,11 @@ class ChatService:
 
     def send_meta_message(self, destination: str, text: str) -> None:
         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
+            logger.error(
+                "Envio para Meta ignorado por configuração ausente. token=%s phone_number_id=%s",
+                _token_hint(self.settings.meta_whatsapp_token),
+                "ok" if self.settings.meta_phone_number_id else "ausente",
+            )
             return
         now = time.time()
         if now < self._meta_send_blocked_until:
@@ -256,6 +272,12 @@ class ChatService:
                     continue
                 if exc.code in {401, 403}:
                     self._meta_send_blocked_until = time.time() + 300
+                    logger.error(
+                        "Erro de autenticação Meta (code=%s). Verifique META_WHATSAPP_TOKEN "
+                        "(token expirado/inválido ou sem permissões whatsapp_business_messaging) "
+                        "e META_PHONE_NUMBER_ID.",
+                        exc.code,
+                    )
                 logger.error(
                     "Falha HTTP ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s detalhe=%s",
                     attempt,

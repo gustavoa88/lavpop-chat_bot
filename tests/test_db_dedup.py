@@ -31,6 +31,38 @@ class _ConnectionWithFailingCursor:
         return None
 
 
+class _CursorCollectingStatements:
+    def __init__(self):
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, query, params=()):
+        self.statements.append(" ".join(str(query).split()))
+
+
+class _ConnectionCollectingStatements:
+    def __init__(self):
+        self.cursor_obj = _CursorCollectingStatements()
+        self.committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def cursor(self):
+        return self.cursor_obj
+
+    def commit(self):
+        self.committed = True
+
+
 def _build_settings() -> Settings:
     return Settings(
         openai_api_key="",
@@ -67,3 +99,22 @@ def test_try_register_webhook_event_allows_processing_when_table_is_missing():
     )
 
     assert should_process is True
+
+
+def test_ensure_minimum_schema_creates_webhook_dedup_objects():
+    db = Database(_build_settings())
+    fake_conn = _ConnectionCollectingStatements()
+
+    @contextmanager
+    def fake_connection():
+        yield fake_conn
+
+    db.connection = fake_connection
+
+    db.ensure_minimum_schema()
+
+    all_sql = "\n".join(fake_conn.cursor_obj.statements).lower()
+    assert "create schema if not exists chatbot" in all_sql
+    assert "create table if not exists chatbot.webhook_event_dedup" in all_sql
+    assert "create index if not exists idx_webhook_event_dedup_processed_at" in all_sql
+    assert fake_conn.committed is True

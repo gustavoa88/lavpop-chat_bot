@@ -1,4 +1,9 @@
-__pycache__/
-*.py[cod]
-.venv/
+# ambiente
 .env
+.env*
+
+# backups
+*_bkp_*
+
+# binários
+*.deb

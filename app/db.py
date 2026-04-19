@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import logging
+import time
 from typing import Any, Iterator, Optional
 
 import psycopg2
@@ -108,3 +109,23 @@ class Database:
             return True
         except Exception:
             return False
+
+    def healthcheck(self) -> dict[str, Any]:
+        started_at = time.perf_counter()
+        try:
+            with self.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            return {
+                "ready": True,
+                "latency_ms": latency_ms,
+            }
+        except Exception as exc:
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            return {
+                "ready": False,
+                "latency_ms": latency_ms,
+                "error": str(exc),
+            }

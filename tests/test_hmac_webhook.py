@@ -211,3 +211,41 @@ def test_health_ready_returns_503_when_database_is_unavailable(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Banco de dados indisponível"
+
+
+def test_health_db_returns_up_when_database_is_ready(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.healthcheck = lambda: {"ready": True, "latency_ms": 1.23}
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/health/db")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "up",
+        "database": {"ready": True, "latency_ms": 1.23},
+    }
+
+
+def test_health_db_returns_503_when_database_is_unavailable(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.healthcheck = lambda: {"ready": False, "latency_ms": 9.87, "error": "timeout"}
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/health/db")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["status"] == "down"
+    assert response.json()["detail"]["database"]["ready"] is False
+
+
+def test_metrics_exposes_counters_and_database_status(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.healthcheck = lambda: {"ready": True, "latency_ms": 2.5}
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "chatbot_webhook_requests_total" in response.text
+    assert "chatbot_database_ready 1" in response.text

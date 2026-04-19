@@ -78,8 +78,31 @@ class _ObservabilityState:
 
 observability_state = _ObservabilityState()
 
+
+def _run_inactivity_watcher(stop_event: threading.Event) -> None:
+    interval_seconds = max(10, settings.inactivity_check_interval_seconds)
+    while not stop_event.wait(interval_seconds):
+        try:
+            closed_count = chat_service.close_inactive_conversations()
+            if closed_count:
+                logger.info(
+                    "Encerramento automático por inatividade executado. conversas_encerradas=%s",
+                    closed_count,
+                )
+        except Exception:
+            logger.exception("Falha no watcher de encerramento por inatividade.")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    inactivity_stop_event = threading.Event()
+    inactivity_worker = threading.Thread(
+        target=_run_inactivity_watcher,
+        args=(inactivity_stop_event,),
+        name="inactivity-watcher",
+        daemon=True,
+    )
+
     db.start()
     if settings.meta_validate_signature and not settings.meta_app_secret:
         if settings.meta_require_app_secret:
@@ -91,10 +114,13 @@ async def lifespan(_: FastAPI):
             "Validação de assinatura Meta está ativa, mas META_APP_SECRET não foi configurado. "
             "A validação será ignorada até o segredo ser definido."
         )
+    inactivity_worker.start()
     logger.info("Aplicação iniciada com sucesso.")
     try:
         yield
     finally:
+        inactivity_stop_event.set()
+        inactivity_worker.join(timeout=2)
         db.stop()
         logger.info("Aplicação finalizada com sucesso.")
 

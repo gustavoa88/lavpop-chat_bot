@@ -62,3 +62,13 @@ class Database:
             with conn.cursor() as cur:
                 cur.execute(query, params)
             conn.commit()
+
+    def is_ready(self) -> bool:
+        try:
+            with self.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            return True
+        except Exception:
+            return False

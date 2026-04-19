@@ -43,10 +43,14 @@ Preencha:
 - `META_PHONE_NUMBER_ID`
 - `META_APP_SECRET` (App Secret da Meta para validar assinatura HMAC do webhook)
 - `META_VALIDATE_SIGNATURE` (`true`/`false`, padrão: `true`)
+- `META_REQUIRE_APP_SECRET` (`true`/`false`, padrão: `false`)
 - dados do PostgreSQL (`DB_*`)
 
 > Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
 > modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
+>
+> Para produção, recomenda-se `META_REQUIRE_APP_SECRET=true`: nesse modo, a aplicação
+> falha na inicialização se `META_APP_SECRET` estiver vazio (fail-fast de segurança).
 
 ## 4) Criar tabelas no PostgreSQL
 
@@ -67,7 +71,12 @@ Health check:
 
 ```bash
 curl http://localhost:8000/
+curl http://localhost:8000/health/live
+curl http://localhost:8000/health/ready
 ```
+
+- `GET /health/live`: confirma que o processo da API está ativo.
+- `GET /health/ready`: valida prontidão real consultando o banco (`SELECT 1`).
 
 ## 6) Webhook da Meta
 
@@ -85,10 +94,11 @@ No painel da Meta, configure:
 
 1. Recebe mensagem via webhook Meta.
 2. Normaliza texto e telefone.
-3. Tenta responder por regra da tabela `chatbot.faq_regras`.
-4. Se não achar regra, usa OpenAI (`OPENAI_MODEL`).
-5. Salva `chatbot.log_conversas` e atualiza `chatbot.contexto_cliente`.
-6. Envia resposta para o usuário via Graph API da Meta.
+3. Se a pessoa enviar uma saudação simples (ex.: `oi`, `olá`, `bom dia`), responde com menu proativo de opções.
+4. Tenta responder por regra da tabela `chatbot.faq_regras`.
+5. Se não achar regra, usa OpenAI (`OPENAI_MODEL`).
+6. Salva `chatbot.log_conversas` e atualiza `chatbot.contexto_cliente`.
+7. Envia resposta para o usuário via Graph API da Meta.
 
 ## 8) Próximos passos recomendados
 

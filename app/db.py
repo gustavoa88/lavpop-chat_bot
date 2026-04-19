@@ -32,6 +32,7 @@ class Database:
             connect_timeout=self._settings.db_connect_timeout,
             application_name="meta_chatbot",
         )
+        self.ensure_minimum_schema()
 
     def stop(self) -> None:
         if self._pool is None:
@@ -67,6 +68,61 @@ class Database:
             with conn.cursor() as cur:
                 cur.execute(query, params)
             conn.commit()
+
+    def ensure_minimum_schema(self) -> None:
+        """
+        Garante objetos mínimos de funcionamento para produção:
+        - schema chatbot
+        - tabela de deduplicação de eventos do webhook
+
+        Isso evita processamento duplicado caso o deploy seja realizado antes de
+        aplicar o db/schema.sql completo.
+        """
+        if self._webhook_dedup_table_exists():
+            return
+
+        ddl_statements = [
+            "CREATE SCHEMA IF NOT EXISTS chatbot",
+            """
+            CREATE TABLE IF NOT EXISTS chatbot.webhook_event_dedup (
+              event_key VARCHAR(255) PRIMARY KEY,
+              payload_hash CHAR(64) NOT NULL,
+              source VARCHAR(60) NOT NULL DEFAULT 'meta_webhook',
+              processed_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_webhook_event_dedup_processed_at
+              ON chatbot.webhook_event_dedup (processed_at DESC)
+            """,
+        ]
+        try:
+            with self.connection() as conn:
+                with conn.cursor() as cur:
+                    for statement in ddl_statements:
+                        cur.execute(statement)
+                conn.commit()
+        except psycopg2.errors.InsufficientPrivilege:
+            logger.warning(
+                "Usuário do banco sem permissão para criar schema/tabela mínima "
+                "de deduplicação. Aplique db/schema.sql com um usuário privilegiado "
+                "ou conceda permissões DDL ao usuário da aplicação."
+            )
+        except Exception:
+            logger.exception(
+                "Falha ao garantir schema mínimo de deduplicação do webhook. "
+                "A aplicação seguirá em modo de compatibilidade."
+            )
+
+    def _webhook_dedup_table_exists(self) -> bool:
+        try:
+            with self.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT to_regclass('chatbot.webhook_event_dedup')")
+                    row = cur.fetchone()
+                    return bool(row and row[0])
+        except Exception:
+            return False
 
     def try_register_webhook_event(
         self,

@@ -58,6 +58,14 @@ Preencha:
 psql -h 127.0.0.1 -U postgres -d lavpop_chatbot -f db/schema.sql
 ```
 
+> A aplicação tenta criar automaticamente o schema `chatbot` e a tabela
+> `chatbot.webhook_event_dedup` na inicialização para preservar idempotência
+> básica. Ainda assim, aplique o `db/schema.sql` para garantir todas as tabelas
+> de negócio (`faq_regras`, `contexto_cliente`, `log_conversas`, etc.).
+>
+> Se o usuário do banco não tiver permissão DDL, a API apenas registra **warning**
+> e segue em modo de compatibilidade (sem quebrar o startup).
+
 ## 5) Rodar API
 
 ```bash
@@ -127,7 +135,13 @@ Checklist:
 
 ## 10) Testes automatizados
 
-Para validar a assinatura HMAC do webhook e evitar regressões em futuras alterações:
+Suite completa de testes unitários:
+
+```bash
+pytest -q
+```
+
+Para validar especificamente a assinatura HMAC do webhook e evitar regressões:
 
 ```bash
 pytest tests/test_hmac_signature_validation.py
@@ -137,6 +151,22 @@ Cenários cobertos:
 - assinatura válida (aceita)
 - assinatura inválida (403)
 - modo compatibilidade com `META_APP_SECRET` ausente (não bloqueia)
+
+### 10.1) Testes de integração com PostgreSQL real
+
+Há uma suíte de integração (`tests/test_db_integration_postgres.py`) que valida:
+- healthcheck/readiness contra PostgreSQL real
+- operações `execute`, `fetchone` e `fetchall`
+- idempotência real de `try_register_webhook_event` com `ON CONFLICT`
+
+Defina uma conexão de teste e rode somente os cenários de integração:
+
+```bash
+export TEST_POSTGRES_DSN='dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432'
+pytest -m integration -q
+```
+
+> Os testes de integração são automaticamente ignorados quando `TEST_POSTGRES_DSN` não está definido.
 
 ## 11) Ajuste rápido da regra `o_que_lavar` (PostgreSQL)
 

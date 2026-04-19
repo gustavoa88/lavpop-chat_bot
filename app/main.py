@@ -290,7 +290,10 @@ async def _process_meta_webhook(request: Request) -> dict:
                             )
                         elif interactive_type == "button_reply":
                             button_reply = interactive_obj.get("button_reply") or {}
-                            incoming_text = (button_reply.get("title") or "").strip()
+                            interactive_id = (button_reply.get("id") or "").strip()
+                            incoming_text = INTERACTIVE_MENU_ID_TO_OPTION.get(
+                                interactive_id, (button_reply.get("title") or "").strip()
+                            )
                         else:
                             incoming_text = ""
                     else:

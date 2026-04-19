@@ -101,3 +101,29 @@ def test_menu_option_1_prefers_database_rule_when_available():
     assert source == "banco"
     assert rule_name == "horario_oficial"
     assert intent == "menu_opcao_1"
+
+
+def test_answer_message_accepts_interactive_list_title_as_option():
+    service = _build_service()
+
+    response, source, rule_name, intent = service.answer_message(
+        "5511941878601", "Gustavo", "1) Horário de atendimento"
+    )
+
+    assert response == PROACTIVE_MENU_OPTIONS["1"]["fallback"]
+    assert source == "menu"
+    assert rule_name is None
+    assert intent == "menu_opcao_1"
+
+
+def test_answer_message_accepts_interactive_list_plain_title_as_option():
+    service = _build_service()
+
+    response, source, rule_name, intent = service.answer_message(
+        "5511941878601", "Gustavo", "Serviços disponíveis"
+    )
+
+    assert response == PROACTIVE_MENU_OPTIONS["4"]["fallback"]
+    assert source == "menu"
+    assert rule_name is None
+    assert intent == "menu_opcao_4"

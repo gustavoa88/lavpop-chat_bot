@@ -352,3 +352,55 @@ def test_metrics_exposes_counters_and_database_status(monkeypatch):
     assert response.status_code == 200
     assert "chatbot_webhook_requests_total" in response.text
     assert "chatbot_database_ready 1" in response.text
+
+
+def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    answered_messages = []
+
+    main_module.db.try_register_webhook_event = lambda **kwargs: True
+
+    def fake_answer_message(phone: str, contact_name: str, incoming_text: str):
+        answered_messages.append((phone, incoming_text))
+        return "Resposta teste", "menu", None, "menu_opcao_2"
+
+    main_module.chat_service.answer_message = fake_answer_message
+    main_module.chat_service.send_meta_message = lambda phone, answer: None
+    main_module.chat_service.send_meta_menu_message = lambda phone: True
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Gustavo"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.button123",
+                                    "from": "5511999999999",
+                                    "timestamp": "1710000111",
+                                    "type": "interactive",
+                                    "interactive": {
+                                        "type": "button_reply",
+                                        "button_reply": {
+                                            "id": "menu_option_2",
+                                            "title": "2) Preços",
+                                        },
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/webhook/meta", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert answered_messages == [("5511999999999", "2")]

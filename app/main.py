@@ -80,34 +80,38 @@ async def _process_meta_webhook(request: Request) -> dict:
                 contact_name = ((contacts[0].get("profile") or {}).get("name") or "").strip()
 
             for message_obj in messages:
-                msg_type = (message_obj.get("type") or "").strip().lower()
-                phone = normalize_phone((message_obj.get("from") or "").strip())
+                try:
+                    msg_type = (message_obj.get("type") or "").strip().lower()
+                    phone = normalize_phone((message_obj.get("from") or "").strip())
 
-                if msg_type == "text":
-                    incoming_text = ((message_obj.get("text") or {}).get("body") or "").strip()
-                elif msg_type == "button":
-                    incoming_text = ((message_obj.get("button") or {}).get("text") or "").strip()
-                else:
-                    incoming_text = ""
+                    if msg_type == "text":
+                        incoming_text = ((message_obj.get("text") or {}).get("body") or "").strip()
+                    elif msg_type == "button":
+                        incoming_text = ((message_obj.get("button") or {}).get("text") or "").strip()
+                    else:
+                        incoming_text = ""
 
-                if not incoming_text or not phone:
+                    if not incoming_text or not phone:
+                        logger.info(
+                            "Mensagem ignorada. type=%s phone=%s text=%s",
+                            msg_type,
+                            phone,
+                            incoming_text,
+                        )
+                        continue
+
                     logger.info(
-                        "Mensagem ignorada. type=%s phone=%s text=%s",
-                        msg_type,
+                        "Mensagem recebida de %s (%s): %s",
+                        contact_name,
                         phone,
                         incoming_text,
                     )
+
+                    answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
+                    chat_service.send_meta_message(phone, answer)
+                except Exception:
+                    logger.exception("Falha ao processar mensagem do webhook para contato=%s", contact_name)
                     continue
-
-                logger.info(
-                    "Mensagem recebida de %s (%s): %s",
-                    contact_name,
-                    phone,
-                    incoming_text,
-                )
-
-                answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
-                chat_service.send_meta_message(phone, answer)
 
     return {"status": "ok"}
 

@@ -13,6 +13,7 @@ from app.config import load_settings
 from app.db import Database
 from app.services import (
     ChatService,
+    INTERACTIVE_MENU_ID_TO_OPTION,
     PROACTIVE_MENU_MESSAGE,
     normalize_phone,
     resolve_interactive_menu_selection,

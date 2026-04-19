@@ -40,6 +40,16 @@ def normalize_phone(phone: str) -> str:
     return (phone or "").replace("whatsapp:", "").strip()
 
 
+def _http_error_body(exc: HTTPError) -> str:
+    try:
+        raw = exc.read()
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    return raw.decode("utf-8", errors="replace").strip()
+
+
 class ChatService:
     def __init__(self, db: Database, settings: Settings):
         self.db = db
@@ -111,7 +121,11 @@ class ChatService:
                 return completion.output_text.strip()
             except Exception as exc:
                 status_code = getattr(exc, "status_code", None)
-                retryable = status_code in {408, 409, 429} or (isinstance(status_code, int) and status_code >= 500)
+                retryable = (
+                    status_code in {408, 409, 429}
+                    or (isinstance(status_code, int) and status_code >= 500)
+                    or isinstance(exc, (TimeoutError, ConnectionError))
+                )
                 if attempt < max_attempts and retryable:
                     wait_seconds = 0.5 * (2 ** (attempt - 1))
                     logger.warning(
@@ -124,11 +138,12 @@ class ChatService:
                     time.sleep(wait_seconds)
                     continue
 
-                logger.exception(
-                    "Falha ao gerar resposta com OpenAI. tentativa=%s/%s status_code=%s",
+                logger.error(
+                    "Falha ao gerar resposta com OpenAI. tentativa=%s/%s status_code=%s erro=%s",
                     attempt,
                     max_attempts,
                     status_code,
+                    exc,
                 )
                 break
 
@@ -218,6 +233,7 @@ class ChatService:
                 with urllib.request.urlopen(req, timeout=10):
                     return
             except HTTPError as exc:
+                details = _http_error_body(exc)
                 retryable = exc.code in {408, 409, 429} or exc.code >= 500
                 if attempt < max_attempts and retryable:
                     wait_seconds = 0.5 * (2 ** (attempt - 1))
@@ -230,12 +246,13 @@ class ChatService:
                     )
                     time.sleep(wait_seconds)
                     continue
-                logger.exception(
-                    "Falha HTTP ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s",
+                logger.error(
+                    "Falha HTTP ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s detalhe=%s",
                     attempt,
                     max_attempts,
                     exc.code,
                     destination,
+                    details or "-",
                 )
                 return
             except (URLError, TimeoutError) as exc:
@@ -250,11 +267,12 @@ class ChatService:
                     )
                     time.sleep(wait_seconds)
                     continue
-                logger.exception(
-                    "Falha de rede final ao enviar mensagem Meta. tentativa=%s/%s destino=%s",
+                logger.error(
+                    "Falha de rede final ao enviar mensagem Meta. tentativa=%s/%s destino=%s erro=%s",
                     attempt,
                     max_attempts,
                     destination,
+                    exc,
                 )
                 return
 

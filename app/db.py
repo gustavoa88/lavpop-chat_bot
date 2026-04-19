@@ -63,6 +63,28 @@ class Database:
                 cur.execute(query, params)
             conn.commit()
 
+    def try_register_webhook_event(
+        self,
+        event_key: str,
+        payload_hash: str,
+        source: str = "meta_webhook",
+    ) -> bool:
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO chatbot.webhook_event_dedup (
+                        event_key, payload_hash, source, processed_at
+                    ) VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (event_key) DO NOTHING
+                    RETURNING event_key
+                    """,
+                    (event_key, payload_hash, source),
+                )
+                inserted = cur.fetchone() is not None
+            conn.commit()
+        return inserted
+
     def is_ready(self) -> bool:
         try:
             with self.connection() as conn:

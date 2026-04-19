@@ -45,8 +45,18 @@ CREATE TABLE IF NOT EXISTS chatbot.log_conversas (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS chatbot.webhook_event_dedup (
+  event_key VARCHAR(255) PRIMARY KEY,
+  payload_hash CHAR(64) NOT NULL,
+  source VARCHAR(60) NOT NULL DEFAULT 'meta_webhook',
+  processed_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_faq_regras_ativo_prioridade
   ON chatbot.faq_regras (ativo, prioridade);
 
 CREATE INDEX IF NOT EXISTS idx_log_conversas_telefone_created
   ON chatbot.log_conversas (telefone, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_event_dedup_processed_at
+  ON chatbot.webhook_event_dedup (processed_at DESC);

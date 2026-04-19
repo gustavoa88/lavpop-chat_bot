@@ -18,6 +18,7 @@ logger = logging.getLogger("meta_chatbot")
 settings = load_settings()
 db = Database(settings)
 chat_service = ChatService(db, settings)
+_meta_signature_secret_missing_logged = False
 
 app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0")
 
@@ -28,7 +29,7 @@ async def startup_event() -> None:
     if settings.meta_validate_signature and not settings.meta_app_secret:
         logger.warning(
             "Validação de assinatura Meta está ativa, mas META_APP_SECRET não foi configurado. "
-            "Os webhooks serão rejeitados até o segredo ser definido."
+            "A validação será ignorada até o segredo ser definido."
         )
     logger.info("Aplicação iniciada com sucesso.")
 
@@ -62,15 +63,20 @@ def _validate_webhook_request(request: Request) -> str:
 
 
 def _validate_meta_signature(request: Request, body: bytes) -> None:
+    global _meta_signature_secret_missing_logged
+
     if not settings.meta_validate_signature:
         return
 
     app_secret = (settings.meta_app_secret or "").strip()
     if not app_secret:
-        raise HTTPException(
-            status_code=503,
-            detail="Webhook temporariamente indisponível: assinatura HMAC sem META_APP_SECRET.",
-        )
+        if not _meta_signature_secret_missing_logged:
+            logger.warning(
+                "META_APP_SECRET ausente: validação HMAC do webhook está sendo ignorada "
+                "(modo compatibilidade). Configure o segredo para ativar validação real."
+            )
+            _meta_signature_secret_missing_logged = True
+        return
 
     signature = (request.headers.get("X-Hub-Signature-256") or "").strip()
     if not signature.startswith("sha256="):

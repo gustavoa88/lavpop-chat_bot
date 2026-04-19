@@ -45,6 +45,9 @@ Preencha:
 - `META_VALIDATE_SIGNATURE` (`true`/`false`, padrão: `true`)
 - dados do PostgreSQL (`DB_*`)
 
+> Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
+> modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
+
 ## 4) Criar tabelas no PostgreSQL
 
 ```bash

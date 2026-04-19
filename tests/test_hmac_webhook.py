@@ -82,6 +82,69 @@ def test_post_webhook_meta_rejects_invalid_hmac_signature(monkeypatch):
     assert response.json()["detail"] == "Assinatura do webhook inválida"
 
 
+def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    seen_events = set()
+    answered_messages = []
+    sent_messages = []
+
+    def fake_try_register_webhook_event(event_key: str, payload_hash: str, source: str = "meta_webhook"):
+        if event_key in seen_events:
+            return False
+        seen_events.add(event_key)
+        return True
+
+    def fake_answer_message(phone: str, contact_name: str, incoming_text: str):
+        answered_messages.append((phone, contact_name, incoming_text))
+        return "Resposta teste", "menu", None, "menu_inicial"
+
+    def fake_send_meta_message(phone: str, answer: str):
+        sent_messages.append((phone, answer))
+
+    main_module.db.try_register_webhook_event = fake_try_register_webhook_event
+    main_module.chat_service.answer_message = fake_answer_message
+    main_module.chat_service.send_meta_message = fake_send_meta_message
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Gustavo"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.abc123",
+                                    "from": "5511999999999",
+                                    "timestamp": "1710000000",
+                                    "type": "text",
+                                    "text": {"body": "oi"},
+                                },
+                                {
+                                    "id": "wamid.abc123",
+                                    "from": "5511999999999",
+                                    "timestamp": "1710000000",
+                                    "type": "text",
+                                    "text": {"body": "oi"},
+                                },
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/webhook/meta", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert len(answered_messages) == 1
+    assert len(sent_messages) == 1
+
+
 def test_post_webhook_meta_compatibility_mode_without_app_secret(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=True, app_secret="")
 

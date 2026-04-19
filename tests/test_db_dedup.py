@@ -32,8 +32,9 @@ class _ConnectionWithFailingCursor:
 
 
 class _CursorCollectingStatements:
-    def __init__(self):
+    def __init__(self, fetchone_values=None):
         self.statements = []
+        self._fetchone_values = list(fetchone_values or [])
 
     def __enter__(self):
         return self
@@ -44,10 +45,15 @@ class _CursorCollectingStatements:
     def execute(self, query, params=()):
         self.statements.append(" ".join(str(query).split()))
 
+    def fetchone(self):
+        if self._fetchone_values:
+            return self._fetchone_values.pop(0)
+        return (None,)
+
 
 class _ConnectionCollectingStatements:
-    def __init__(self):
-        self.cursor_obj = _CursorCollectingStatements()
+    def __init__(self, fetchone_values=None):
+        self.cursor_obj = _CursorCollectingStatements(fetchone_values=fetchone_values)
         self.committed = False
 
     def __enter__(self):
@@ -61,6 +67,37 @@ class _ConnectionCollectingStatements:
 
     def commit(self):
         self.committed = True
+
+
+class _CursorRaiseInsufficientPrivilege:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, query, params=()):
+        query_str = str(query).lower()
+        if "to_regclass" in query_str:
+            return None
+        raise psycopg2.errors.InsufficientPrivilege("permission denied")
+
+    def fetchone(self):
+        return (None,)
+
+
+class _ConnectionWithPrivilegeError:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def cursor(self):
+        return _CursorRaiseInsufficientPrivilege()
+
+    def commit(self):
+        return None
 
 
 def _build_settings() -> Settings:
@@ -103,7 +140,7 @@ def test_try_register_webhook_event_allows_processing_when_table_is_missing():
 
 def test_ensure_minimum_schema_creates_webhook_dedup_objects():
     db = Database(_build_settings())
-    fake_conn = _ConnectionCollectingStatements()
+    fake_conn = _ConnectionCollectingStatements(fetchone_values=[(None,)])
 
     @contextmanager
     def fake_connection():
@@ -118,3 +155,35 @@ def test_ensure_minimum_schema_creates_webhook_dedup_objects():
     assert "create table if not exists chatbot.webhook_event_dedup" in all_sql
     assert "create index if not exists idx_webhook_event_dedup_processed_at" in all_sql
     assert fake_conn.committed is True
+
+
+def test_ensure_minimum_schema_skips_ddl_when_table_already_exists():
+    db = Database(_build_settings())
+    fake_conn = _ConnectionCollectingStatements(fetchone_values=[("chatbot.webhook_event_dedup",)])
+
+    @contextmanager
+    def fake_connection():
+        yield fake_conn
+
+    db.connection = fake_connection
+
+    db.ensure_minimum_schema()
+
+    all_sql = "\n".join(fake_conn.cursor_obj.statements).lower()
+    assert "to_regclass('chatbot.webhook_event_dedup')" in all_sql
+    assert "create table if not exists chatbot.webhook_event_dedup" not in all_sql
+    assert fake_conn.committed is False
+
+
+def test_ensure_minimum_schema_logs_warning_when_user_lacks_ddl_permission(caplog):
+    db = Database(_build_settings())
+
+    @contextmanager
+    def fake_connection():
+        yield _ConnectionWithPrivilegeError()
+
+    db.connection = fake_connection
+
+    db.ensure_minimum_schema()
+
+    assert "sem permissão para criar schema/tabela mínima de deduplicação" in caplog.text

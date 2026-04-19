@@ -55,6 +55,7 @@ class ChatService:
         self.db = db
         self.settings = settings
         self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self._meta_send_blocked_until = 0.0
 
     def find_rule_response(self, message: str) -> tuple[Optional[str], Optional[str]]:
         msg_norm = normalize_text(message)
@@ -208,6 +209,13 @@ class ChatService:
     def send_meta_message(self, destination: str, text: str) -> None:
         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
             return
+        now = time.time()
+        if now < self._meta_send_blocked_until:
+            logger.warning(
+                "Envio para Meta temporariamente desabilitado por erro de autenticação anterior. destino=%s",
+                destination,
+            )
+            return
 
         url = f"https://graph.facebook.com/v23.0/{self.settings.meta_phone_number_id}/messages"
         payload = {
@@ -246,10 +254,12 @@ class ChatService:
                     )
                     time.sleep(wait_seconds)
                     continue
+                if exc.code in {401, 403}:
+                    self._meta_send_blocked_until = time.time() + 300
                 logger.error(
                     "Falha HTTP ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s detalhe=%s",
                     attempt,
-                    max_attempts,
+                    max_attempts if retryable else attempt,
                     exc.code,
                     destination,
                     details or "-",

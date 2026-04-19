@@ -106,6 +106,26 @@ def _validate_meta_signature(request: Request, body: bytes) -> None:
         raise HTTPException(status_code=403, detail="Assinatura do webhook inválida")
 
 
+def _build_message_event_key(message_obj: dict, phone: str, incoming_text: str, msg_type: str) -> str:
+    message_id = (message_obj.get("id") or "").strip()
+    if message_id:
+        return f"meta_msg_id:{message_id}"
+
+    timestamp = (message_obj.get("timestamp") or "").strip()
+    fingerprint = json.dumps(
+        {
+            "from": phone,
+            "type": msg_type,
+            "text": incoming_text,
+            "timestamp": timestamp,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+    return f"meta_msg_fallback:{digest}"
+
+
 @app.get("/webhook")
 async def verify_webhook_root(request: Request):
     challenge = _validate_webhook_request(request)
@@ -121,6 +141,7 @@ async def verify_webhook_meta(request: Request):
 async def _process_meta_webhook(request: Request) -> dict:
     raw_body = await request.body()
     _validate_meta_signature(request, raw_body)
+    payload_hash = hashlib.sha256(raw_body).hexdigest()
 
     try:
         payload = json.loads(raw_body.decode("utf-8"))
@@ -157,6 +178,20 @@ async def _process_meta_webhook(request: Request) -> dict:
                             msg_type,
                             phone,
                             incoming_text,
+                        )
+                        continue
+
+                    event_key = _build_message_event_key(message_obj, phone, incoming_text, msg_type)
+                    is_new_event = db.try_register_webhook_event(
+                        event_key=event_key,
+                        payload_hash=payload_hash,
+                        source="meta_webhook_message",
+                    )
+                    if not is_new_event:
+                        logger.info(
+                            "Mensagem duplicada ignorada por idempotência. event_key=%s phone=%s",
+                            event_key,
+                            phone,
                         )
                         continue
 

@@ -4,6 +4,7 @@ import importlib
 import json
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -13,6 +14,7 @@ DEFAULT_ENV = {
     "META_VERIFY_TOKEN": "verify-token",
     "META_WHATSAPP_TOKEN": "",
     "META_PHONE_NUMBER_ID": "",
+    "META_REQUIRE_APP_SECRET": "false",
     "DB_HOST": "127.0.0.1",
     "DB_PORT": "5432",
     "DB_NAME": "lavpop_chatbot",
@@ -94,3 +96,22 @@ def test_post_webhook_meta_compatibility_mode_without_app_secret(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_startup_fails_in_strict_mode_without_app_secret(monkeypatch):
+    for key, value in DEFAULT_ENV.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.setenv("META_VALIDATE_SIGNATURE", "true")
+    monkeypatch.setenv("META_REQUIRE_APP_SECRET", "true")
+    monkeypatch.setenv("META_APP_SECRET", "")
+
+    import app.main as main_module
+
+    main_module = importlib.reload(main_module)
+    main_module.db.start = lambda: None
+    main_module.db.stop = lambda: None
+
+    with pytest.raises(RuntimeError, match="META_APP_SECRET é obrigatório"):
+        with TestClient(main_module.app):
+            pass

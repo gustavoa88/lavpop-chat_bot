@@ -27,6 +27,11 @@ app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0")
 async def startup_event() -> None:
     db.start()
     if settings.meta_validate_signature and not settings.meta_app_secret:
+        if settings.meta_require_app_secret:
+            raise RuntimeError(
+                "META_APP_SECRET é obrigatório quando META_VALIDATE_SIGNATURE=true e "
+                "META_REQUIRE_APP_SECRET=true. Defina o segredo ou desative o modo estrito."
+            )
         logger.warning(
             "Validação de assinatura Meta está ativa, mas META_APP_SECRET não foi configurado. "
             "A validação será ignorada até o segredo ser definido."

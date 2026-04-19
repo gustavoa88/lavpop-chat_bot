@@ -1,5 +1,5 @@
 from app.config import Settings
-from app.services import ChatService, PROACTIVE_MENU_MESSAGE
+from app.services import ChatService, PROACTIVE_MENU_MESSAGE, PROACTIVE_MENU_OPTIONS
 
 
 class FakeDatabase:
@@ -68,3 +68,14 @@ def test_answer_message_keeps_regular_flow_for_non_greeting_message():
     assert source == "ia"
     assert rule_name is None
     assert intent is None
+
+
+def test_answer_message_returns_fixed_response_for_menu_option_1():
+    service = _build_service()
+
+    response, source, rule_name, intent = service.answer_message("5511941878601", "Gustavo", "1")
+
+    assert response == PROACTIVE_MENU_OPTIONS["1"]
+    assert source == "menu"
+    assert rule_name is None
+    assert intent == "menu_opcao_1"

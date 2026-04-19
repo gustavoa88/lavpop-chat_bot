@@ -95,10 +95,11 @@ No painel da Meta, configure:
 1. Recebe mensagem via webhook Meta.
 2. Normaliza texto e telefone.
 3. Se a pessoa enviar uma saudação simples (ex.: `oi`, `olá`, `bom dia`), responde com menu proativo de opções.
-4. Tenta responder por regra da tabela `chatbot.faq_regras`.
-5. Se não achar regra, usa OpenAI (`OPENAI_MODEL`).
-6. Salva `chatbot.log_conversas` e atualiza `chatbot.contexto_cliente`.
-7. Envia resposta para o usuário via Graph API da Meta.
+4. Se a pessoa responder com `1`, `2`, `3`, `4` ou `5`, retorna resposta direta do menu (horário, preços, como funciona, serviços ou atendimento humano).
+5. Tenta responder por regra da tabela `chatbot.faq_regras`.
+6. Se não achar regra, usa OpenAI (`OPENAI_MODEL`).
+7. Salva `chatbot.log_conversas` e atualiza `chatbot.contexto_cliente`.
+8. Envia resposta para o usuário via Graph API da Meta.
 
 ## 8) Próximos passos recomendados
 

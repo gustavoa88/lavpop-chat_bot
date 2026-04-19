@@ -26,6 +26,40 @@ PROACTIVE_MENU_MESSAGE = (
     "Me diga o número da opção ou escreva o tema 🙂"
 )
 
+PROACTIVE_MENU_OPTIONS = {
+    "1": (
+        "🕒 *Horário de atendimento*\n"
+        "Segunda a sexta: 8h às 18h\n"
+        "Sábado: 8h às 12h\n"
+        "Domingo e feriados: fechado."
+    ),
+    "2": (
+        "💰 *Preços*\n"
+        "Os valores variam por tipo de peça e serviço.\n"
+        "Se quiser, te passo um orçamento rápido: me diga quais peças você precisa lavar."
+    ),
+    "3": (
+        "🧺 *Como funciona*\n"
+        "1) Você envia o pedido\n"
+        "2) Coletamos as peças\n"
+        "3) Lavamos e finalizamos\n"
+        "4) Entregamos para você.\n"
+        "Se quiser, já te explico como agendar."
+    ),
+    "4": (
+        "✅ *Serviços disponíveis*\n"
+        "- Lavagem de roupas do dia a dia\n"
+        "- Peças delicadas\n"
+        "- Edredons e cobertores\n"
+        "- Passadoria\n"
+        "- Coleta e entrega (sob consulta de região)"
+    ),
+    "5": (
+        "🤝 *Atendimento humano*\n"
+        "Perfeito! Vou encaminhar seu atendimento para nossa equipe humana."
+    ),
+}
+
 
 def normalize_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -147,6 +181,14 @@ class ChatService:
             "ei",
         }
         return msg_norm in simple_greetings
+
+    def proactive_menu_option_response(self, message: str) -> tuple[Optional[str], Optional[str]]:
+        msg_norm = normalize_text(message)
+        msg_norm = re.sub(r"[!?.,:;\\s]+", "", msg_norm).strip()
+        response = PROACTIVE_MENU_OPTIONS.get(msg_norm)
+        if not response:
+            return None, None
+        return response, f"menu_opcao_{msg_norm}"
 
     def ai_response(self, message: str, customer_name: str, context: Optional[dict]) -> str:
         if not self.client:
@@ -374,17 +416,24 @@ class ChatService:
             response_type = "menu_boas_vindas"
             intent = "menu_inicial"
         else:
-            rule_answer, rule_name = self.find_rule_response(message)
-            intent = self.classify_intent(message)
-
-            if rule_answer:
-                response = rule_answer
-                source = "banco"
-                response_type = f"regra_{rule_name}"
+            option_response, option_intent = self.proactive_menu_option_response(message)
+            if option_response:
+                response = option_response
+                source = "menu"
+                response_type = "menu_opcao"
+                intent = option_intent
             else:
-                response = self.ai_response(message, name, context)
-                source = "ia"
-                response_type = "ia"
+                rule_answer, rule_name = self.find_rule_response(message)
+                intent = self.classify_intent(message)
+
+                if rule_answer:
+                    response = rule_answer
+                    source = "banco"
+                    response_type = f"regra_{rule_name}"
+                else:
+                    response = self.ai_response(message, name, context)
+                    source = "ia"
+                    response_type = "ia"
 
         self.save_log(phone, name, message, response, source, rule_name)
         self.save_context(phone, name, intent, rule_name or intent, response_type)

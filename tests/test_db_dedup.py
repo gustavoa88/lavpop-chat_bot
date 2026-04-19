@@ -31,6 +31,31 @@ class _ConnectionWithFailingCursor:
         return None
 
 
+class _CursorRaisingUndefinedColumn:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, query, params):
+        raise psycopg2.errors.UndefinedColumn("column does not exist")
+
+
+class _ConnectionWithUndefinedColumn:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def cursor(self):
+        return _CursorRaisingUndefinedColumn()
+
+    def commit(self):
+        return None
+
+
 class _CursorCollectingStatements:
     def __init__(self, fetchone_values=None):
         self.statements = []
@@ -155,6 +180,23 @@ def test_ensure_minimum_schema_creates_webhook_dedup_objects():
     assert "create table if not exists chatbot.webhook_event_dedup" in all_sql
     assert "create index if not exists idx_webhook_event_dedup_processed_at" in all_sql
     assert fake_conn.committed is True
+
+
+def test_try_register_webhook_event_allows_processing_when_table_is_outdated():
+    db = Database(_build_settings())
+
+    @contextmanager
+    def fake_connection():
+        yield _ConnectionWithUndefinedColumn()
+
+    db.connection = fake_connection
+
+    should_process = db.try_register_webhook_event(
+        event_key="meta_msg_id:1",
+        payload_hash="0" * 64,
+    )
+
+    assert should_process is True
 
 
 def test_ensure_minimum_schema_skips_ddl_when_table_already_exists():

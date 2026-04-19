@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -15,6 +18,7 @@ logger = logging.getLogger("meta_chatbot")
 settings = load_settings()
 db = Database(settings)
 chat_service = ChatService(db, settings)
+_meta_signature_secret_missing_logged = False
 
 app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0")
 
@@ -22,6 +26,11 @@ app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0")
 @app.on_event("startup")
 async def startup_event() -> None:
     db.start()
+    if settings.meta_validate_signature and not settings.meta_app_secret:
+        logger.warning(
+            "Validação de assinatura Meta está ativa, mas META_APP_SECRET não foi configurado. "
+            "A validação será ignorada até o segredo ser definido."
+        )
     logger.info("Aplicação iniciada com sucesso.")
 
 
@@ -53,6 +62,31 @@ def _validate_webhook_request(request: Request) -> str:
     raise HTTPException(status_code=403, detail="Falha na verificação do webhook")
 
 
+def _validate_meta_signature(request: Request, body: bytes) -> None:
+    global _meta_signature_secret_missing_logged
+
+    if not settings.meta_validate_signature:
+        return
+
+    app_secret = (settings.meta_app_secret or "").strip()
+    if not app_secret:
+        if not _meta_signature_secret_missing_logged:
+            logger.warning(
+                "META_APP_SECRET ausente: validação HMAC do webhook está sendo ignorada "
+                "(modo compatibilidade). Configure o segredo para ativar validação real."
+            )
+            _meta_signature_secret_missing_logged = True
+        return
+
+    signature = (request.headers.get("X-Hub-Signature-256") or "").strip()
+    if not signature.startswith("sha256="):
+        raise HTTPException(status_code=403, detail="Assinatura do webhook ausente ou inválida")
+
+    expected = "sha256=" + hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=403, detail="Assinatura do webhook inválida")
+
+
 @app.get("/webhook")
 async def verify_webhook_root(request: Request):
     challenge = _validate_webhook_request(request)
@@ -66,7 +100,14 @@ async def verify_webhook_meta(request: Request):
 
 
 async def _process_meta_webhook(request: Request) -> dict:
-    payload = await request.json()
+    raw_body = await request.body()
+    _validate_meta_signature(request, raw_body)
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Payload JSON inválido") from exc
+
     logger.info("Webhook recebido: %s", payload)
 
     for entry in payload.get("entry", []):

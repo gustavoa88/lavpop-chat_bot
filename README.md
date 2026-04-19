@@ -41,7 +41,12 @@ Preencha:
 - `META_VERIFY_TOKEN`
 - `META_WHATSAPP_TOKEN`
 - `META_PHONE_NUMBER_ID`
+- `META_APP_SECRET` (App Secret da Meta para validar assinatura HMAC do webhook)
+- `META_VALIDATE_SIGNATURE` (`true`/`false`, padrão: `true`)
 - dados do PostgreSQL (`DB_*`)
+
+> Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
+> modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
 
 ## 4) Criar tabelas no PostgreSQL
 
@@ -68,10 +73,13 @@ curl http://localhost:8000/
 
 - URL de verificação webhook: `GET /webhook/meta`
 - URL para eventos: `POST /webhook/meta`
+- A API valida a assinatura `X-Hub-Signature-256` usando HMAC SHA-256 quando
+  `META_VALIDATE_SIGNATURE=true` (recomendado para produção).
 
 No painel da Meta, configure:
 - Callback URL (ex.: `https://SEU_DOMINIO/webhook/meta`)
 - Verify token = valor de `META_VERIFY_TOKEN`
+- Use também o `App Secret` do mesmo app para preencher `META_APP_SECRET`.
 
 ## 7) Lógica do bot
 
@@ -85,7 +93,6 @@ No painel da Meta, configure:
 ## 8) Próximos passos recomendados
 
 - Adicionar testes automatizados (pytest).
-- Implementar assinatura HMAC de webhook para segurança avançada.
 - Criar endpoint de observabilidade (métricas/health DB).
 - Criar painel administrativo para manter FAQ e intenções.
 

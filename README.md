@@ -99,7 +99,8 @@ No painel da Meta, configure:
 1. Recebe mensagem via webhook Meta.
 2. Normaliza texto e telefone.
 3. Se a pessoa enviar uma saudação simples (ex.: `oi`, `olá`, `bom dia`), responde com menu proativo de opções.
-   - Quando possível, envia **menu interativo do WhatsApp** (lista com botão `Opções`).
+   - Quando possível, envia **Interactive List Message do WhatsApp** (botão `Opções` que abre a lista selecionável).
+   - O bot interpreta seleção por `id` da opção, título da linha (ex.: `2) Preços`) e também texto livre contendo número (`quero opção 4`).
    - Se a API da Meta rejeitar menu interativo, faz fallback automático para mensagem de texto.
 4. Se a pessoa responder com `1`, `2`, `3`, `4` ou `5`, busca primeiro resposta cadastrada no banco para o tema; se não houver, retorna fallback do menu.
 5. Tenta responder por regra da tabela `chatbot.faq_regras`.

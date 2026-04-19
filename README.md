@@ -58,6 +58,11 @@ Preencha:
 psql -h 127.0.0.1 -U postgres -d lavpop_chatbot -f db/schema.sql
 ```
 
+> A aplicação tenta criar automaticamente o schema `chatbot` e a tabela
+> `chatbot.webhook_event_dedup` na inicialização para preservar idempotência
+> básica. Ainda assim, aplique o `db/schema.sql` para garantir todas as tabelas
+> de negócio (`faq_regras`, `contexto_cliente`, `log_conversas`, etc.).
+
 ## 5) Rodar API
 
 ```bash

@@ -1,5 +1,11 @@
 from app.config import Settings
-from app.services import ChatService, normalize_phone, normalize_text
+from app.services import (
+    ChatService,
+    extract_menu_option,
+    normalize_phone,
+    normalize_text,
+    resolve_interactive_menu_selection,
+)
 
 
 class FakeDatabase:
@@ -82,3 +88,15 @@ def test_classify_intent_matches_intent_name_with_underscore():
     intent = service.classify_intent("quero falar humano agora")
 
     assert intent == "falar_humano"
+
+
+def test_extract_menu_option_supports_number_inside_text():
+    assert extract_menu_option("Quero a opção 4, por favor.") == "4"
+
+
+def test_resolve_interactive_menu_selection_accepts_known_title():
+    selection = resolve_interactive_menu_selection(
+        interactive_id="",
+        interactive_title="2) Preços",
+    )
+    assert selection == "2"

@@ -140,30 +140,7 @@ def _extract_menu_option_token(message: str) -> str:
 
     title_to_option = {
         "horario de atendimento": "1",
-        "precos": "2",
-        "como funciona": "3",
-        "servicos disponiveis": "4",
-        "atendimento humano": "5",
-    }
-    return title_to_option.get(compact_no_punct, "")
-
-
-def _extract_menu_option_token(message: str) -> str:
-    msg_norm = normalize_text(message)
-    compact = re.sub(r"\s+", " ", msg_norm).strip()
-    if not compact:
-        return ""
-
-    numeric_match = re.match(r"^(\d)", compact)
-    if numeric_match:
-        return numeric_match.group(1)
-
-    compact_no_punct = re.sub(r"[^\w\s]", " ", compact)
-    compact_no_punct = re.sub(r"\s+", " ", compact_no_punct).strip()
-
-    title_to_option = {
-        "horario de atendimento": "1",
-        "atendimento": "1",
+        "atendimento": "5",
         "precos": "2",
         "como funciona": "3",
         "servicos disponiveis": "4",

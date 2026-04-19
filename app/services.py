@@ -80,6 +80,22 @@ PROACTIVE_MENU_OPTIONS = {
     },
 }
 
+PROACTIVE_MENU_ROWS = [
+    {"id": "menu_option_1", "title": "1) Horário de atendimento"},
+    {"id": "menu_option_2", "title": "2) Preços"},
+    {"id": "menu_option_3", "title": "3) Como funciona"},
+    {"id": "menu_option_4", "title": "4) Serviços disponíveis"},
+    {"id": "menu_option_5", "title": "5) Atendimento humano"},
+]
+
+INTERACTIVE_MENU_ID_TO_OPTION = {
+    "menu_option_1": "1",
+    "menu_option_2": "2",
+    "menu_option_3": "3",
+    "menu_option_4": "4",
+    "menu_option_5": "5",
+}
+
 
 def normalize_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -434,6 +450,78 @@ class ChatService:
                     exc,
                 )
                 return
+
+    def send_meta_menu_message(self, destination: str) -> bool:
+        if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
+            logger.error(
+                "Envio de menu para Meta ignorado por configuração ausente. token=%s phone_number_id=%s",
+                _token_hint(self.settings.meta_whatsapp_token),
+                "ok" if self.settings.meta_phone_number_id else "ausente",
+            )
+            return False
+
+        now = time.time()
+        if now < self._meta_send_blocked_until:
+            logger.warning(
+                "Envio de menu para Meta temporariamente desabilitado por erro de autenticação anterior. destino=%s",
+                destination,
+            )
+            return False
+
+        url = f"https://graph.facebook.com/v23.0/{self.settings.meta_phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": destination,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "header": {"type": "text", "text": "Oi! Que bom falar com você. 💙"},
+                "body": {"text": "Sobre o que você precisa de ajuda?"},
+                "footer": {"text": "Escreva uma frase curta ou escolha uma opção na lista."},
+                "action": {
+                    "button": "Opções",
+                    "sections": [
+                        {
+                            "title": "Atendimento LavPop",
+                            "rows": PROACTIVE_MENU_ROWS,
+                        }
+                    ],
+                },
+            },
+        }
+
+        req = urllib.request.Request(
+            url=url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.settings.meta_whatsapp_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                logger.info("Menu interativo enviado com sucesso para %s", destination)
+                return True
+        except HTTPError as exc:
+            details = _http_error_body(exc)
+            if exc.code in {401, 403}:
+                self._meta_send_blocked_until = time.time() + 300
+            logger.error(
+                "Falha HTTP ao enviar menu interativo Meta. code=%s destino=%s detalhe=%s",
+                exc.code,
+                destination,
+                details or "-",
+            )
+            return False
+        except (URLError, TimeoutError) as exc:
+            logger.error(
+                "Falha de rede ao enviar menu interativo Meta. destino=%s erro=%s",
+                destination,
+                exc,
+            )
+            return False
 
     def answer_message(self, phone: str, name: str, message: str) -> tuple[str, str, Optional[str], Optional[str]]:
         context = self.get_customer_context(phone)

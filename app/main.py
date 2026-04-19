@@ -11,7 +11,12 @@ import logging
 
 from app.config import load_settings
 from app.db import Database
-from app.services import ChatService, normalize_phone
+from app.services import (
+    ChatService,
+    INTERACTIVE_MENU_ID_TO_OPTION,
+    PROACTIVE_MENU_MESSAGE,
+    normalize_phone,
+)
 
 load_dotenv()
 
@@ -273,6 +278,20 @@ async def _process_meta_webhook(request: Request) -> dict:
                         incoming_text = ((message_obj.get("text") or {}).get("body") or "").strip()
                     elif msg_type == "button":
                         incoming_text = ((message_obj.get("button") or {}).get("text") or "").strip()
+                    elif msg_type == "interactive":
+                        interactive_obj = message_obj.get("interactive") or {}
+                        interactive_type = (interactive_obj.get("type") or "").strip().lower()
+                        if interactive_type == "list_reply":
+                            list_reply = interactive_obj.get("list_reply") or {}
+                            interactive_id = (list_reply.get("id") or "").strip()
+                            incoming_text = INTERACTIVE_MENU_ID_TO_OPTION.get(
+                                interactive_id, (list_reply.get("title") or "").strip()
+                            )
+                        elif interactive_type == "button_reply":
+                            button_reply = interactive_obj.get("button_reply") or {}
+                            incoming_text = (button_reply.get("title") or "").strip()
+                        else:
+                            incoming_text = ""
                     else:
                         incoming_text = ""
 
@@ -309,7 +328,12 @@ async def _process_meta_webhook(request: Request) -> dict:
                     )
 
                     answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
-                    chat_service.send_meta_message(phone, answer)
+                    if answer == PROACTIVE_MENU_MESSAGE:
+                        sent = chat_service.send_meta_menu_message(phone)
+                        if not sent:
+                            chat_service.send_meta_message(phone, answer)
+                    else:
+                        chat_service.send_meta_message(phone, answer)
                     observability_state.mark_processed()
                 except Exception:
                     logger.exception("Falha ao processar mensagem do webhook para contato=%s", contact_name)

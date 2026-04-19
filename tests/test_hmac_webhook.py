@@ -102,9 +102,13 @@ def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
     def fake_send_meta_message(phone: str, answer: str):
         sent_messages.append((phone, answer))
 
+    def fake_send_meta_menu_message(phone: str):
+        return False
+
     main_module.db.try_register_webhook_event = fake_try_register_webhook_event
     main_module.chat_service.answer_message = fake_answer_message
     main_module.chat_service.send_meta_message = fake_send_meta_message
+    main_module.chat_service.send_meta_menu_message = fake_send_meta_menu_message
 
     payload = {
         "entry": [
@@ -143,6 +147,105 @@ def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
     assert response.json() == {"status": "ok"}
     assert len(answered_messages) == 1
     assert len(sent_messages) == 1
+
+
+def test_post_webhook_meta_interactive_list_reply_maps_to_menu_option(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    answered_messages = []
+
+    main_module.db.try_register_webhook_event = lambda **kwargs: True
+
+    def fake_answer_message(phone: str, contact_name: str, incoming_text: str):
+        answered_messages.append((phone, incoming_text))
+        return "Resposta teste", "menu", None, "menu_opcao_1"
+
+    main_module.chat_service.answer_message = fake_answer_message
+    main_module.chat_service.send_meta_message = lambda phone, answer: None
+    main_module.chat_service.send_meta_menu_message = lambda phone: True
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Gustavo"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.interactive123",
+                                    "from": "5511999999999",
+                                    "timestamp": "1710000100",
+                                    "type": "interactive",
+                                    "interactive": {
+                                        "type": "list_reply",
+                                        "list_reply": {
+                                            "id": "menu_option_1",
+                                            "title": "1) Horário de atendimento",
+                                        },
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/webhook/meta", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert answered_messages == [("5511999999999", "1")]
+
+
+def test_post_webhook_meta_sends_interactive_menu_for_greeting(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    menu_calls = []
+    text_calls = []
+
+    main_module.db.try_register_webhook_event = lambda **kwargs: True
+    main_module.chat_service.answer_message = lambda phone, contact_name, incoming_text: (
+        main_module.PROACTIVE_MENU_MESSAGE,
+        "menu",
+        None,
+        "menu_inicial",
+    )
+    main_module.chat_service.send_meta_menu_message = lambda phone: menu_calls.append(phone) or True
+    main_module.chat_service.send_meta_message = lambda phone, answer: text_calls.append((phone, answer))
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Gustavo"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.greeting123",
+                                    "from": "5511999999999",
+                                    "timestamp": "1710000200",
+                                    "type": "text",
+                                    "text": {"body": "oi"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/webhook/meta", json=payload)
+
+    assert response.status_code == 200
+    assert menu_calls == ["5511999999999"]
+    assert text_calls == []
 
 
 def test_post_webhook_meta_compatibility_mode_without_app_secret(monkeypatch):

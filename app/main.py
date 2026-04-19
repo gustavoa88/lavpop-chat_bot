@@ -1,6 +1,8 @@
 import hashlib
 import hmac
 import json
+import threading
+import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -9,7 +11,12 @@ import logging
 
 from app.config import load_settings
 from app.db import Database
-from app.services import ChatService, normalize_phone
+from app.services import (
+    ChatService,
+    INTERACTIVE_MENU_ID_TO_OPTION,
+    PROACTIVE_MENU_MESSAGE,
+    normalize_phone,
+)
 
 load_dotenv()
 
@@ -20,6 +27,55 @@ settings = load_settings()
 db = Database(settings)
 chat_service = ChatService(db, settings)
 _meta_signature_secret_missing_logged = False
+
+
+class _ObservabilityState:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.webhook_total = 0
+        self.messages_processed_total = 0
+        self.messages_ignored_total = 0
+        self.messages_duplicate_total = 0
+        self.processing_errors_total = 0
+        self.last_processing_seconds = 0.0
+
+    def mark_webhook(self) -> None:
+        with self._lock:
+            self.webhook_total += 1
+
+    def mark_processed(self) -> None:
+        with self._lock:
+            self.messages_processed_total += 1
+
+    def mark_ignored(self) -> None:
+        with self._lock:
+            self.messages_ignored_total += 1
+
+    def mark_duplicate(self) -> None:
+        with self._lock:
+            self.messages_duplicate_total += 1
+
+    def mark_error(self) -> None:
+        with self._lock:
+            self.processing_errors_total += 1
+
+    def set_last_processing_seconds(self, seconds: float) -> None:
+        with self._lock:
+            self.last_processing_seconds = seconds
+
+    def snapshot(self) -> dict[str, float]:
+        with self._lock:
+            return {
+                "webhook_total": float(self.webhook_total),
+                "messages_processed_total": float(self.messages_processed_total),
+                "messages_ignored_total": float(self.messages_ignored_total),
+                "messages_duplicate_total": float(self.messages_duplicate_total),
+                "processing_errors_total": float(self.processing_errors_total),
+                "last_processing_seconds": self.last_processing_seconds,
+            }
+
+
+observability_state = _ObservabilityState()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -62,6 +118,57 @@ async def health_ready() -> dict:
             detail="Banco de dados indisponível",
         )
     return {"status": "ready", "dependencies": {"database": "ok"}}
+
+
+@app.get("/health/db")
+async def health_db() -> dict:
+    db_health = db.healthcheck()
+    if not db_health["ready"]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "down",
+                "database": db_health,
+            },
+        )
+    return {"status": "up", "database": db_health}
+
+
+@app.get("/metrics")
+async def metrics() -> PlainTextResponse:
+    metrics_snapshot = observability_state.snapshot()
+    db_health = db.healthcheck()
+    db_ready = 1 if db_health["ready"] else 0
+    db_latency_ms = db_health["latency_ms"]
+
+    lines = [
+        "# HELP chatbot_webhook_requests_total Total de webhooks recebidos.",
+        "# TYPE chatbot_webhook_requests_total counter",
+        f"chatbot_webhook_requests_total {int(metrics_snapshot['webhook_total'])}",
+        "# HELP chatbot_messages_processed_total Total de mensagens processadas com resposta.",
+        "# TYPE chatbot_messages_processed_total counter",
+        f"chatbot_messages_processed_total {int(metrics_snapshot['messages_processed_total'])}",
+        "# HELP chatbot_messages_ignored_total Total de mensagens ignoradas por payload inválido.",
+        "# TYPE chatbot_messages_ignored_total counter",
+        f"chatbot_messages_ignored_total {int(metrics_snapshot['messages_ignored_total'])}",
+        "# HELP chatbot_messages_duplicate_total Total de mensagens descartadas por idempotência.",
+        "# TYPE chatbot_messages_duplicate_total counter",
+        f"chatbot_messages_duplicate_total {int(metrics_snapshot['messages_duplicate_total'])}",
+        "# HELP chatbot_message_processing_errors_total Total de erros no processamento de mensagens.",
+        "# TYPE chatbot_message_processing_errors_total counter",
+        f"chatbot_message_processing_errors_total {int(metrics_snapshot['processing_errors_total'])}",
+        "# HELP chatbot_webhook_last_processing_seconds Duração do último processamento de webhook.",
+        "# TYPE chatbot_webhook_last_processing_seconds gauge",
+        f"chatbot_webhook_last_processing_seconds {metrics_snapshot['last_processing_seconds']:.6f}",
+        "# HELP chatbot_database_ready Estado do banco (1=up, 0=down).",
+        "# TYPE chatbot_database_ready gauge",
+        f"chatbot_database_ready {db_ready}",
+        "# HELP chatbot_database_latency_ms Latência do check de banco em milissegundos.",
+        "# TYPE chatbot_database_latency_ms gauge",
+        f"chatbot_database_latency_ms {db_latency_ms}",
+    ]
+
+    return PlainTextResponse(content="\n".join(lines) + "\n")
 
 
 def _validate_webhook_request(request: Request) -> str:
@@ -139,6 +246,8 @@ async def verify_webhook_meta(request: Request):
 
 
 async def _process_meta_webhook(request: Request) -> dict:
+    observability_state.mark_webhook()
+    started_at = time.perf_counter()
     raw_body = await request.body()
     _validate_meta_signature(request, raw_body)
     payload_hash = hashlib.sha256(raw_body).hexdigest()
@@ -169,6 +278,20 @@ async def _process_meta_webhook(request: Request) -> dict:
                         incoming_text = ((message_obj.get("text") or {}).get("body") or "").strip()
                     elif msg_type == "button":
                         incoming_text = ((message_obj.get("button") or {}).get("text") or "").strip()
+                    elif msg_type == "interactive":
+                        interactive_obj = message_obj.get("interactive") or {}
+                        interactive_type = (interactive_obj.get("type") or "").strip().lower()
+                        if interactive_type == "list_reply":
+                            list_reply = interactive_obj.get("list_reply") or {}
+                            interactive_id = (list_reply.get("id") or "").strip()
+                            incoming_text = INTERACTIVE_MENU_ID_TO_OPTION.get(
+                                interactive_id, (list_reply.get("title") or "").strip()
+                            )
+                        elif interactive_type == "button_reply":
+                            button_reply = interactive_obj.get("button_reply") or {}
+                            incoming_text = (button_reply.get("title") or "").strip()
+                        else:
+                            incoming_text = ""
                     else:
                         incoming_text = ""
 
@@ -179,6 +302,7 @@ async def _process_meta_webhook(request: Request) -> dict:
                             phone,
                             incoming_text,
                         )
+                        observability_state.mark_ignored()
                         continue
 
                     event_key = _build_message_event_key(message_obj, phone, incoming_text, msg_type)
@@ -193,6 +317,7 @@ async def _process_meta_webhook(request: Request) -> dict:
                             event_key,
                             phone,
                         )
+                        observability_state.mark_duplicate()
                         continue
 
                     logger.info(
@@ -203,11 +328,19 @@ async def _process_meta_webhook(request: Request) -> dict:
                     )
 
                     answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
-                    chat_service.send_meta_message(phone, answer)
+                    if answer == PROACTIVE_MENU_MESSAGE:
+                        sent = chat_service.send_meta_menu_message(phone)
+                        if not sent:
+                            chat_service.send_meta_message(phone, answer)
+                    else:
+                        chat_service.send_meta_message(phone, answer)
+                    observability_state.mark_processed()
                 except Exception:
                     logger.exception("Falha ao processar mensagem do webhook para contato=%s", contact_name)
+                    observability_state.mark_error()
                     continue
 
+    observability_state.set_last_processing_seconds(time.perf_counter() - started_at)
     return {"status": "ok"}
 
 

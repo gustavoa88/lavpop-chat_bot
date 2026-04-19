@@ -73,10 +73,14 @@ Health check:
 curl http://localhost:8000/
 curl http://localhost:8000/health/live
 curl http://localhost:8000/health/ready
+curl http://localhost:8000/health/db
+curl http://localhost:8000/metrics
 ```
 
 - `GET /health/live`: confirma que o processo da API está ativo.
 - `GET /health/ready`: valida prontidão real consultando o banco (`SELECT 1`).
+- `GET /health/db`: retorna status detalhado do banco com latência do check.
+- `GET /metrics`: expõe métricas de webhook/processamento e status de banco no formato Prometheus text exposition.
 
 ## 6) Webhook da Meta
 
@@ -95,6 +99,8 @@ No painel da Meta, configure:
 1. Recebe mensagem via webhook Meta.
 2. Normaliza texto e telefone.
 3. Se a pessoa enviar uma saudação simples (ex.: `oi`, `olá`, `bom dia`), responde com menu proativo de opções.
+   - Quando possível, envia **menu interativo do WhatsApp** (lista com botão `Opções`).
+   - Se a API da Meta rejeitar menu interativo, faz fallback automático para mensagem de texto.
 4. Se a pessoa responder com `1`, `2`, `3`, `4` ou `5`, busca primeiro resposta cadastrada no banco para o tema; se não houver, retorna fallback do menu.
 5. Tenta responder por regra da tabela `chatbot.faq_regras`.
 6. Se não achar regra, usa OpenAI (`OPENAI_MODEL`).
@@ -105,7 +111,6 @@ No painel da Meta, configure:
 ## 8) Próximos passos recomendados
 
 - Evoluir suíte de testes automatizados (pytest) com cenários de integração reais em PostgreSQL.
-- Criar endpoint de observabilidade (métricas/health DB).
 - Criar painel administrativo para manter FAQ e intenções.
 
 ## 9) Troubleshooting rápido (erro 401 da Meta)

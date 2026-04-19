@@ -3,6 +3,8 @@ import logging
 import re
 import time
 import urllib.request
+from datetime import date, datetime
+from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from typing import Any, Optional
 
@@ -61,6 +63,14 @@ def _token_hint(token: str) -> str:
     return "formato_desconhecido"
 
 
+def _json_default_serializer(obj: Any) -> Any:
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    return str(obj)
+
+
 class ChatService:
     def __init__(self, db: Database, settings: Settings):
         self.db = db
@@ -81,11 +91,20 @@ class ChatService:
         for row in rules:
             keywords = row.get("palavras_chave") or []
             if isinstance(keywords, str):
-                keywords = json.loads(keywords)
+                try:
+                    keywords = json.loads(keywords)
+                except json.JSONDecodeError:
+                    logger.warning("Falha ao converter palavras_chave da regra '%s'", row.get("nome_regra"))
+                    keywords = []
+
+            if not isinstance(keywords, list):
+                keywords = [keywords]
+
             for keyword in keywords:
                 kw = normalize_text(str(keyword))
                 if kw and kw in msg_norm:
                     return row["resposta"], row["nome_regra"]
+
         return None, None
 
     def classify_intent(self, message: str) -> Optional[str]:
@@ -99,8 +118,9 @@ class ChatService:
             """
         )
         for intent in intents:
-            if intent["nome_intencao"].replace("_", " ") in message_norm:
-                return intent["nome_intencao"]
+            intent_name = (intent.get("nome_intencao") or "").strip()
+            if intent_name and intent_name.replace("_", " ") in message_norm:
+                return intent_name
         return None
 
     def ai_response(self, message: str, customer_name: str, context: Optional[dict]) -> str:
@@ -113,7 +133,10 @@ class ChatService:
             "Se não souber algo, diga que vai encaminhar para atendimento humano."
         )
 
-        context_prompt = f"Contexto cliente: {json.dumps(context or {}, ensure_ascii=False)}"
+        context_prompt = (
+            f"Contexto cliente: "
+            f"{json.dumps(context or {}, ensure_ascii=False, default=_json_default_serializer)}"
+        )
 
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -130,7 +153,8 @@ class ChatService:
                     ],
                     max_output_tokens=220,
                 )
-                return completion.output_text.strip()
+                return (completion.output_text or "").strip()
+
             except Exception as exc:
                 status_code = getattr(exc, "status_code", None)
                 retryable = (
@@ -138,6 +162,7 @@ class ChatService:
                     or (isinstance(status_code, int) and status_code >= 500)
                     or isinstance(exc, (TimeoutError, ConnectionError))
                 )
+
                 if attempt < max_attempts and retryable:
                     wait_seconds = 0.5 * (2 ** (attempt - 1))
                     logger.warning(
@@ -150,12 +175,11 @@ class ChatService:
                     time.sleep(wait_seconds)
                     continue
 
-                logger.error(
-                    "Falha ao gerar resposta com OpenAI. tentativa=%s/%s status_code=%s erro=%s",
+                logger.exception(
+                    "Falha ao gerar resposta com OpenAI. tentativa=%s/%s status_code=%s",
                     attempt,
                     max_attempts,
                     status_code,
-                    exc,
                 )
                 break
 
@@ -225,6 +249,7 @@ class ChatService:
                 "ok" if self.settings.meta_phone_number_id else "ausente",
             )
             return
+
         now = time.time()
         if now < self._meta_send_blocked_until:
             logger.warning(
@@ -243,7 +268,7 @@ class ChatService:
 
         req = urllib.request.Request(
             url=url,
-            data=json.dumps(payload).encode("utf-8"),
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {self.settings.meta_whatsapp_token}",
                 "Content-Type": "application/json",
@@ -255,10 +280,13 @@ class ChatService:
         for attempt in range(1, max_attempts + 1):
             try:
                 with urllib.request.urlopen(req, timeout=10):
+                    logger.info("Mensagem enviada com sucesso para %s", destination)
                     return
+
             except HTTPError as exc:
                 details = _http_error_body(exc)
                 retryable = exc.code in {408, 409, 429} or exc.code >= 500
+
                 if attempt < max_attempts and retryable:
                     wait_seconds = 0.5 * (2 ** (attempt - 1))
                     logger.warning(
@@ -270,6 +298,7 @@ class ChatService:
                     )
                     time.sleep(wait_seconds)
                     continue
+
                 if exc.code in {401, 403}:
                     self._meta_send_blocked_until = time.time() + 300
                     logger.error(
@@ -278,6 +307,7 @@ class ChatService:
                         "e META_PHONE_NUMBER_ID.",
                         exc.code,
                     )
+
                 logger.error(
                     "Falha HTTP ao enviar mensagem Meta. tentativa=%s/%s code=%s destino=%s detalhe=%s",
                     attempt,
@@ -287,6 +317,7 @@ class ChatService:
                     details or "-",
                 )
                 return
+
             except (URLError, TimeoutError) as exc:
                 if attempt < max_attempts:
                     wait_seconds = 0.5 * (2 ** (attempt - 1))
@@ -299,6 +330,7 @@ class ChatService:
                     )
                     time.sleep(wait_seconds)
                     continue
+
                 logger.error(
                     "Falha de rede final ao enviar mensagem Meta. tentativa=%s/%s destino=%s erro=%s",
                     attempt,

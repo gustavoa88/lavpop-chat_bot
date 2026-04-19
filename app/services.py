@@ -60,14 +60,14 @@ PROACTIVE_MENU_OPTIONS = {
     },
     "4": {
         "intent": "menu_opcao_4",
+        "preferred_rule": "o_que_lavar",
         "lookup_terms": ["servicos", "tipos de servico", "o que voces fazem"],
         "fallback": (
             "✅ *Serviços disponíveis*\n"
             "- Lavagem de roupas do dia a dia\n"
             "- Peças delicadas\n"
-            "- Edredons e cobertores\n"
-            "- Passadoria\n"
-            "- Coleta e entrega (sob consulta de região)"
+            "\nPara confirmar itens específicos (ex.: edredom, tapete, tênis), "
+            "me diga a peça e eu te explico o que pode ou não pode lavar por aqui."
         ),
     },
     "5": {
@@ -267,6 +267,25 @@ class ChatService:
 
         return None, None
 
+    def find_rule_by_name(self, rule_name: str) -> Optional[str]:
+        target_rule = normalize_text(rule_name)
+        if not target_rule:
+            return None
+
+        rules = self.db.fetchall(
+            """
+            SELECT nome_regra, resposta
+              FROM chatbot.faq_regras
+             WHERE ativo = TRUE
+             ORDER BY prioridade ASC, id ASC
+            """
+        )
+        for row in rules:
+            current_rule = normalize_text(str(row.get("nome_regra") or ""))
+            if current_rule == target_rule:
+                return row.get("resposta")
+        return None
+
     def classify_intent(self, message: str) -> Optional[str]:
         message_norm = normalize_text(message)
         intents = self.db.fetchall(
@@ -304,6 +323,12 @@ class ChatService:
         option = PROACTIVE_MENU_OPTIONS.get(option_key)
         if not option:
             return None, None, None, None
+
+        preferred_rule = (option.get("preferred_rule") or "").strip()
+        if preferred_rule:
+            preferred_answer = self.find_rule_by_name(preferred_rule)
+            if preferred_answer:
+                return preferred_answer, option["intent"], preferred_rule, "banco"
 
         for term in option["lookup_terms"]:
             db_answer, rule_name = self.find_rule_response(term)

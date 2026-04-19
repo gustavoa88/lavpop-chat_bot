@@ -134,6 +134,25 @@ def test_answer_message_accepts_interactive_list_plain_title_as_option():
     assert intent == "menu_opcao_4"
 
 
+def test_menu_option_4_prefers_rule_o_que_lavar_when_available():
+    service = _build_service(
+        rules=[
+            {
+                "nome_regra": "o_que_lavar",
+                "resposta": "Aqui lavamos roupas do dia a dia e peças delicadas. Me diga a peça para confirmar.",
+                "palavras_chave": ["o que pode lavar"],
+            }
+        ]
+    )
+
+    response, source, rule_name, intent = service.answer_message("5511941878601", "Gustavo", "4")
+
+    assert "Me diga a peça" in response
+    assert source == "banco"
+    assert rule_name == "o_que_lavar"
+    assert intent == "menu_opcao_4"
+
+
 def test_answer_message_maps_generic_atendimento_to_human_support_option():
     service = _build_service()
 

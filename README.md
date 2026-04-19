@@ -137,3 +137,20 @@ Cenários cobertos:
 - assinatura válida (aceita)
 - assinatura inválida (403)
 - modo compatibilidade com `META_APP_SECRET` ausente (não bloqueia)
+
+## 11) Ajuste rápido da regra `o_que_lavar` (PostgreSQL)
+
+Se o menu "4) Serviços disponíveis" estiver retornando itens que a unidade não oferece,
+atualize a regra `o_que_lavar` no banco:
+
+```bash
+psql -h 127.0.0.1 -U postgres -d lavpop_chatbot -f db/update_o_que_lavar.sql
+```
+
+Depois, valide:
+
+```sql
+SELECT nome_regra, palavras_chave, resposta
+  FROM chatbot.faq_regras
+ WHERE nome_regra = 'o_que_lavar';
+```

@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -20,29 +21,47 @@ db = Database(settings)
 chat_service = ChatService(db, settings)
 _meta_signature_secret_missing_logged = False
 
-app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0")
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     db.start()
     if settings.meta_validate_signature and not settings.meta_app_secret:
+        if settings.meta_require_app_secret:
+            raise RuntimeError(
+                "META_APP_SECRET é obrigatório quando META_VALIDATE_SIGNATURE=true e "
+                "META_REQUIRE_APP_SECRET=true. Defina o segredo ou desative o modo estrito."
+            )
         logger.warning(
             "Validação de assinatura Meta está ativa, mas META_APP_SECRET não foi configurado. "
             "A validação será ignorada até o segredo ser definido."
         )
     logger.info("Aplicação iniciada com sucesso.")
+    try:
+        yield
+    finally:
+        db.stop()
+        logger.info("Aplicação finalizada com sucesso.")
 
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    db.stop()
-    logger.info("Aplicação finalizada com sucesso.")
+app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/")
 async def healthcheck() -> dict:
     return {"status": "ok", "service": "meta-chatbot"}
+
+
+@app.get("/health/live")
+async def health_live() -> dict:
+    return {"status": "alive", "service": "meta-chatbot"}
+
+
+@app.get("/health/ready")
+async def health_ready() -> dict:
+    if not db.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail="Banco de dados indisponível",
+        )
+    return {"status": "ready", "dependencies": {"database": "ok"}}
 
 
 def _validate_webhook_request(request: Request) -> str:

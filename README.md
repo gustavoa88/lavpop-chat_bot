@@ -43,10 +43,14 @@ Preencha:
 - `META_PHONE_NUMBER_ID`
 - `META_APP_SECRET` (App Secret da Meta para validar assinatura HMAC do webhook)
 - `META_VALIDATE_SIGNATURE` (`true`/`false`, padrão: `true`)
+- `META_REQUIRE_APP_SECRET` (`true`/`false`, padrão: `false`)
 - dados do PostgreSQL (`DB_*`)
 
 > Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
 > modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
+>
+> Para produção, recomenda-se `META_REQUIRE_APP_SECRET=true`: nesse modo, a aplicação
+> falha na inicialização se `META_APP_SECRET` estiver vazio (fail-fast de segurança).
 
 ## 4) Criar tabelas no PostgreSQL
 
@@ -67,7 +71,12 @@ Health check:
 
 ```bash
 curl http://localhost:8000/
+curl http://localhost:8000/health/live
+curl http://localhost:8000/health/ready
 ```
+
+- `GET /health/live`: confirma que o processo da API está ativo.
+- `GET /health/ready`: valida prontidão real consultando o banco (`SELECT 1`).
 
 ## 6) Webhook da Meta
 

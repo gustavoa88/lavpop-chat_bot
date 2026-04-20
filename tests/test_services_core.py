@@ -51,6 +51,7 @@ def _build_service(rules=None, intents=None) -> ChatService:
         db_connect_timeout=3,
         inactivity_timeout_minutes=15,
         inactivity_check_interval_seconds=60,
+        app_env="test",
     )
     return ChatService(FakeDatabase(rules=rules, intents=intents), settings)
 
@@ -143,6 +144,7 @@ def test_close_inactive_conversations_sends_message_and_updates_status(monkeypat
         db_connect_timeout=3,
         inactivity_timeout_minutes=15,
         inactivity_check_interval_seconds=60,
+        app_env="test",
     )
     service = ChatService(FakeDbInactivity(), settings)
     monkeypatch.setattr(service, "send_meta_message", lambda destination, text: True)
@@ -189,6 +191,7 @@ def test_save_context_reactivates_closed_context():
         db_connect_timeout=3,
         inactivity_timeout_minutes=15,
         inactivity_check_interval_seconds=60,
+        app_env="test",
     )
     fake_db = FakeDbSaveContext()
     service = ChatService(fake_db, settings)

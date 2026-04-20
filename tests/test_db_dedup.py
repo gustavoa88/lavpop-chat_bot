@@ -145,6 +145,7 @@ def _build_settings() -> Settings:
         db_connect_timeout=3,
         inactivity_timeout_minutes=15,
         inactivity_check_interval_seconds=60,
+        app_env="test",
     )
 
 

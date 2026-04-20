@@ -11,13 +11,8 @@ import logging
 
 from app.config import load_settings
 from app.db import Database
-from app.services import (
-    ChatService,
-    INTERACTIVE_MENU_ID_TO_OPTION,
-    PROACTIVE_MENU_MESSAGE,
-    normalize_phone,
-    resolve_interactive_menu_selection,
-)
+from app.services import ChatService, PROACTIVE_MENU_MESSAGE
+from app.webhook_parser import parse_meta_message_events
 
 load_dotenv()
 
@@ -79,6 +74,14 @@ class _ObservabilityState:
 observability_state = _ObservabilityState()
 
 
+def _enforce_production_security_baseline() -> None:
+    if settings.app_env in {"prod", "production"} and not settings.meta_require_app_secret:
+        raise RuntimeError(
+            "Em produção (APP_ENV=prod|production), META_REQUIRE_APP_SECRET deve ser true "
+            "para impedir modo compatibilidade sem validação HMAC estrita."
+        )
+
+
 def _run_inactivity_watcher(stop_event: threading.Event) -> None:
     interval_seconds = max(10, settings.inactivity_check_interval_seconds)
     while not stop_event.wait(interval_seconds):
@@ -104,6 +107,7 @@ async def lifespan(_: FastAPI):
     )
 
     db.start()
+    _enforce_production_security_baseline()
     if settings.meta_validate_signature and not settings.meta_app_secret:
         if settings.meta_require_app_secret:
             raise RuntimeError(
@@ -286,90 +290,58 @@ async def _process_meta_webhook(request: Request) -> dict:
 
     logger.info("Webhook recebido: %s", payload)
 
-    for entry in payload.get("entry", []):
-        for change in entry.get("changes", []):
-            value = change.get("value", {})
-            contacts = value.get("contacts", [])
-            messages = value.get("messages", [])
+    for event in parse_meta_message_events(payload):
+        try:
+            message_obj = event.message_obj
+            msg_type = event.msg_type
+            phone = event.phone
+            incoming_text = event.incoming_text
+            contact_name = event.contact_name
 
-            contact_name = ""
-            if contacts:
-                contact_name = ((contacts[0].get("profile") or {}).get("name") or "").strip()
+            if not incoming_text or not phone:
+                logger.info(
+                    "Mensagem ignorada. type=%s phone=%s text=%s",
+                    msg_type,
+                    phone,
+                    incoming_text,
+                )
+                observability_state.mark_ignored()
+                continue
 
-            for message_obj in messages:
-                try:
-                    msg_type = (message_obj.get("type") or "").strip().lower()
-                    phone = normalize_phone((message_obj.get("from") or "").strip())
+            event_key = _build_message_event_key(message_obj, phone, incoming_text, msg_type)
+            is_new_event = db.try_register_webhook_event(
+                event_key=event_key,
+                payload_hash=payload_hash,
+                source="meta_webhook_message",
+            )
+            if not is_new_event:
+                logger.info(
+                    "Mensagem duplicada ignorada por idempotência. event_key=%s phone=%s",
+                    event_key,
+                    phone,
+                )
+                observability_state.mark_duplicate()
+                continue
 
-                    if msg_type == "text":
-                        incoming_text = ((message_obj.get("text") or {}).get("body") or "").strip()
-                    elif msg_type == "button":
-                        incoming_text = ((message_obj.get("button") or {}).get("text") or "").strip()
-                    elif msg_type == "interactive":
-                        interactive_obj = message_obj.get("interactive") or {}
-                        interactive_type = (interactive_obj.get("type") or "").strip().lower()
-                        if interactive_type == "list_reply":
-                            list_reply = interactive_obj.get("list_reply") or {}
-                            incoming_text = resolve_interactive_menu_selection(
-                                interactive_id=(list_reply.get("id") or "").strip(),
-                                interactive_title=(list_reply.get("title") or "").strip(),
-                                interactive_description=(list_reply.get("description") or "").strip(),
-                            )
-                        elif interactive_type == "button_reply":
-                            button_reply = interactive_obj.get("button_reply") or {}
-                            interactive_id = (button_reply.get("id") or "").strip()
-                            incoming_text = INTERACTIVE_MENU_ID_TO_OPTION.get(
-                                interactive_id, (button_reply.get("title") or "").strip()
-                            )
-                        else:
-                            incoming_text = ""
-                    else:
-                        incoming_text = ""
+            logger.info(
+                "Mensagem recebida de %s (%s): %s",
+                contact_name,
+                phone,
+                incoming_text,
+            )
 
-                    if not incoming_text or not phone:
-                        logger.info(
-                            "Mensagem ignorada. type=%s phone=%s text=%s",
-                            msg_type,
-                            phone,
-                            incoming_text,
-                        )
-                        observability_state.mark_ignored()
-                        continue
-
-                    event_key = _build_message_event_key(message_obj, phone, incoming_text, msg_type)
-                    is_new_event = db.try_register_webhook_event(
-                        event_key=event_key,
-                        payload_hash=payload_hash,
-                        source="meta_webhook_message",
-                    )
-                    if not is_new_event:
-                        logger.info(
-                            "Mensagem duplicada ignorada por idempotência. event_key=%s phone=%s",
-                            event_key,
-                            phone,
-                        )
-                        observability_state.mark_duplicate()
-                        continue
-
-                    logger.info(
-                        "Mensagem recebida de %s (%s): %s",
-                        contact_name,
-                        phone,
-                        incoming_text,
-                    )
-
-                    answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
-                    if answer == PROACTIVE_MENU_MESSAGE:
-                        sent = chat_service.send_meta_menu_message(phone)
-                        if not sent:
-                            chat_service.send_meta_message(phone, answer)
-                    else:
-                        chat_service.send_meta_message(phone, answer)
-                    observability_state.mark_processed()
-                except Exception:
-                    logger.exception("Falha ao processar mensagem do webhook para contato=%s", contact_name)
-                    observability_state.mark_error()
-                    continue
+            answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
+            if answer == PROACTIVE_MENU_MESSAGE:
+                sent = chat_service.send_meta_menu_message(phone)
+                if not sent:
+                    chat_service.send_meta_message(phone, answer)
+            else:
+                chat_service.send_meta_message(phone, answer)
+            observability_state.mark_processed()
+        except Exception:
+            logger.exception("Falha ao processar mensagem do webhook para contato=%s", event.contact_name)
+            observability_state.mark_error()
+            continue
 
     observability_state.set_last_processing_seconds(time.perf_counter() - started_at)
     return {"status": "ok"}

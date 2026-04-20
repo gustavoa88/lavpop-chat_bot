@@ -99,6 +99,11 @@ curl http://localhost:8000/metrics
 - `GET /health/db`: retorna status detalhado do banco com latência do check.
 - `GET /metrics`: expõe métricas de webhook/processamento e status de banco no formato Prometheus text exposition.
 
+Regras de alertas operacionais (Prometheus) para disponibilidade e erro de processamento:
+
+- `monitoring/prometheus/alerts.yml`
+- `docs/ALERTING_SETUP_2026-04-20.md`
+
 ## 6) Webhook da Meta
 
 - URL de verificação webhook: `GET /webhook/meta`

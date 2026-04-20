@@ -1,0 +1,51 @@
+groups:
+  - name: lavpop-chatbot-availability
+    interval: 30s
+    rules:
+      - alert: LavpopChatbotUnavailable
+        expr: up{job="lavpop-chatbot"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          service: lavpop-chatbot
+        annotations:
+          summary: "Chatbot indisponível"
+          description: "O target lavpop-chatbot está sem resposta há mais de 3 minutos."
+
+      - alert: LavpopChatbotDatabaseDown
+        expr: chatbot_database_ready{job="lavpop-chatbot"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: lavpop-chatbot
+        annotations:
+          summary: "Banco indisponível para o chatbot"
+          description: "A métrica chatbot_database_ready está em 0 há mais de 2 minutos."
+
+  - name: lavpop-chatbot-processing
+    interval: 30s
+    rules:
+      - alert: LavpopChatbotProcessingErrorRateHigh
+        expr: |
+          (
+            sum(rate(chatbot_message_processing_errors_total{job="lavpop-chatbot"}[5m]))
+            /
+            clamp_min(sum(rate(chatbot_webhook_requests_total{job="lavpop-chatbot"}[5m])), 0.001)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          service: lavpop-chatbot
+        annotations:
+          summary: "Taxa de erro de processamento alta"
+          description: "A taxa de erro de processamento está acima de 5% por mais de 10 minutos."
+
+      - alert: LavpopChatbotWebhookLatencyP95High
+        expr: avg_over_time(chatbot_webhook_last_processing_seconds{job="lavpop-chatbot"}[10m]) > 2
+        for: 15m
+        labels:
+          severity: warning
+          service: lavpop-chatbot
+        annotations:
+          summary: "Latência média do webhook elevada"
+          description: "A duração média do processamento do webhook está acima de 2s por mais de 15 minutos."

@@ -77,11 +77,11 @@ O principal risco não é funcional, e sim de **governança operacional**:
 
 ## Checklist mínimo de produção (resumo)
 
-- [ ] CI de release executa `pytest -q` e `pytest -m integration -q` com Postgres real.
+- [x] CI de release executa `pytest -q` e `pytest -m integration -q` com Postgres real.
 - [x] Deploy bloqueado por workflow (`Deploy release`) se integração falhar ou baseline de segurança estiver fora do padrão.
 - [x] `/metrics` e `/health/*` acessíveis somente internamente.
 - [x] Runbook com procedimentos para indisponibilidade de DB e falha de autenticação na Meta.
-- [ ] Alertas configurados para disponibilidade e erro de processamento.
+- [x] Alertas configurados para disponibilidade e erro de processamento.
 
 ## Conclusão
 
@@ -109,6 +109,23 @@ Para completar a governança de merge em `main`, ainda recomenda-se no GitHub (n
 
 - Branch protection/ruleset exigindo o check `Integration tests (release gate)` para `main`;
 - Bloqueio de merge enquanto esse check estiver falhando ou pendente.
+
+## Verificação operacional final — branch protection/ruleset (GitHub)
+
+Status da validação nesta revisão:
+
+- [ ] Confirmar no GitHub (Settings → Branches/Rulesets) que `main` exige o check `Integration tests (release gate)`.
+- [ ] Confirmar bloqueio de merge com checks pendentes/falhando para PRs em `main`.
+- [ ] Confirmar exigência de branch atualizada com status checks antes do merge (strict mode/rebase requirement).
+
+> Observação: esta confirmação depende de acesso administrativo ao repositório no GitHub.
+
+## Alertas operacionais configurados
+
+As regras mínimas para disponibilidade e erro de processamento foram registradas em:
+
+- `monitoring/prometheus/alerts.yml`
+- `docs/ALERTING_SETUP_2026-04-20.md`
 
 ## Runbook operacional — indisponibilidade de DB e falha de autenticação Meta
 

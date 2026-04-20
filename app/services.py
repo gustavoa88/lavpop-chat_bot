@@ -181,6 +181,26 @@ def normalize_phone(phone: str) -> str:
     return (phone or "").replace("whatsapp:", "").strip()
 
 
+def is_sensitive_request(message: str) -> bool:
+    msg_norm = normalize_text(message)
+    sensitive_terms = {
+        "senha",
+        "wi fi",
+        "wifi",
+        "codigo",
+        "codigo de acesso",
+        "token",
+        "chave",
+        "documento",
+        "cpf",
+        "cnpj",
+        "cartao",
+        "pix",
+        "dados bancarios",
+    }
+    return any(term in msg_norm for term in sensitive_terms)
+
+
 def extract_menu_option(message: str) -> Optional[str]:
     normalized = normalize_text(message)
     match = re.search(r"\b([1-5])\b", normalized)
@@ -350,7 +370,10 @@ class ChatService:
         system_prompt = (
             "Você é atendente virtual da lavanderia LavPop Jardim São Bernardo. "
             "Responda em português brasileiro, em tom amigável e objetivo. "
-            "Se não souber algo, diga que vai encaminhar para atendimento humano."
+            "Nunca invente dados. "
+            "Se não houver confirmação explícita no contexto, diga que não tem essa informação e encaminhe para atendimento humano. "
+            "Para pedidos sensíveis (senha, código de acesso, credenciais, dados pessoais, dados bancários), "
+            "nunca forneça valores: apenas informe que um atendente humano vai orientar com segurança."
         )
 
         context_prompt = (
@@ -713,6 +736,13 @@ class ChatService:
                     response = rule_answer
                     source = "banco"
                     response_type = f"regra_{rule_name}"
+                elif is_sensitive_request(message):
+                    response = (
+                        "Por segurança, eu não posso informar esse dado por aqui sem validação. "
+                        "Vou encaminhar agora para atendimento humano te orientar com segurança. 🤝"
+                    )
+                    source = "seguranca"
+                    response_type = "seguranca_encaminhamento"
                 else:
                     response = self.ai_response(message, name, context)
                     source = "ia"

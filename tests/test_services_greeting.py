@@ -52,6 +52,7 @@ def _build_service(rules=None) -> ChatService:
         db_connect_timeout=3,
         inactivity_timeout_minutes=15,
         inactivity_check_interval_seconds=60,
+        app_env="test",
     )
     return ChatService(FakeDatabase(rules=rules), settings)
 

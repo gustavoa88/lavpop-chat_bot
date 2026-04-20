@@ -19,3 +19,11 @@ def test_load_settings_reads_inactivity_values_from_env(monkeypatch):
 
     assert settings.inactivity_timeout_minutes == 30
     assert settings.inactivity_check_interval_seconds == 120
+
+
+def test_load_settings_reads_app_env(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+
+    settings = load_settings()
+
+    assert settings.app_env == "production"

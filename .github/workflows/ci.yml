@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -24,3 +26,40 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  integration-release:
+    name: Integration tests (release gate)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: lavpop_chatbot
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lavpop_chatbot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run integration tests against PostgreSQL
+        env:
+          TEST_POSTGRES_DSN: dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432
+        run: pytest -m integration -q

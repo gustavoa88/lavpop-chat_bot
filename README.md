@@ -47,12 +47,14 @@ Preencha:
 - dados do PostgreSQL (`DB_*`)
 - `INACTIVITY_TIMEOUT_MINUTES` (padrão: `15`)
 - `INACTIVITY_CHECK_INTERVAL_SECONDS` (padrão: `60`)
+- `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
 
 > Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
 > modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
 >
-> Para produção, recomenda-se `META_REQUIRE_APP_SECRET=true`: nesse modo, a aplicação
-> falha na inicialização se `META_APP_SECRET` estiver vazio (fail-fast de segurança).
+> Para produção, use `APP_ENV=prod` (ou `production`) e `META_REQUIRE_APP_SECRET=true`:
+> nesse modo, a aplicação falha na inicialização se a configuração de assinatura não estiver
+> estrita (fail-fast de segurança).
 
 ## 4) Criar tabelas no PostgreSQL
 
@@ -169,7 +171,8 @@ export TEST_POSTGRES_DSN='dbname=lavpop_chatbot user=postgres password=postgres 
 pytest -m integration -q
 ```
 
-> Os testes de integração são automaticamente ignorados quando `TEST_POSTGRES_DSN` não está definido.
+> Os testes de integração são automaticamente ignorados localmente quando `TEST_POSTGRES_DSN` não está definido.
+> No CI de release (branch `main`/tags `v*`), a suíte de integração com PostgreSQL é obrigatória como gate.
 
 ## 11) Ajuste rápido da regra `o_que_lavar` (PostgreSQL)
 

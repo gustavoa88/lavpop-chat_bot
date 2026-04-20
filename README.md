@@ -47,6 +47,7 @@ Preencha:
 - dados do PostgreSQL (`DB_*`)
 - `INACTIVITY_TIMEOUT_MINUTES` (padrão: `15`)
 - `INACTIVITY_CHECK_INTERVAL_SECONDS` (padrão: `60`)
+- `OBSERVABILITY_INTERNAL_ONLY` (`true`/`false`, padrão: `true`) para restringir `/metrics` e `/health/*` a rede interna
 - `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
 
 > Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
@@ -88,6 +89,10 @@ curl http://localhost:8000/health/ready
 curl http://localhost:8000/health/db
 curl http://localhost:8000/metrics
 ```
+
+> Por padrão (`OBSERVABILITY_INTERNAL_ONLY=true`), os endpoints operacionais
+> `/metrics` e `/health/*` só aceitam origem interna (IP privado/loopback/link-local).
+> Requisições externas recebem HTTP 403.
 
 - `GET /health/live`: confirma que o processo da API está ativo.
 - `GET /health/ready`: valida prontidão real consultando o banco (`SELECT 1`).

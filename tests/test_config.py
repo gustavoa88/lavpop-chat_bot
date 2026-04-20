@@ -27,3 +27,19 @@ def test_load_settings_reads_app_env(monkeypatch):
     settings = load_settings()
 
     assert settings.app_env == "production"
+
+
+def test_load_settings_uses_observability_internal_only_default(monkeypatch):
+    monkeypatch.delenv("OBSERVABILITY_INTERNAL_ONLY", raising=False)
+
+    settings = load_settings()
+
+    assert settings.observability_internal_only is True
+
+
+def test_load_settings_reads_observability_internal_only_from_env(monkeypatch):
+    monkeypatch.setenv("OBSERVABILITY_INTERNAL_ONLY", "false")
+
+    settings = load_settings()
+
+    assert settings.observability_internal_only is False

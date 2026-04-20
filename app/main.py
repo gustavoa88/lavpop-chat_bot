@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import ipaddress
 import json
 import threading
 import time
@@ -82,6 +83,39 @@ def _enforce_production_security_baseline() -> None:
         )
 
 
+def _resolve_request_ip(request: Request) -> str:
+    forwarded_for = (request.headers.get("x-forwarded-for") or "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host.strip()
+    return ""
+
+
+def _is_internal_request(request_ip: str) -> bool:
+    if request_ip in {"localhost", "testclient"}:
+        return True
+
+    try:
+        parsed_ip = ipaddress.ip_address(request_ip)
+    except ValueError:
+        return False
+
+    return parsed_ip.is_private or parsed_ip.is_loopback or parsed_ip.is_link_local
+
+
+def _enforce_internal_observability_access(request: Request) -> None:
+    if not settings.observability_internal_only:
+        return
+
+    request_ip = _resolve_request_ip(request)
+    if not _is_internal_request(request_ip):
+        raise HTTPException(
+            status_code=403,
+            detail="Endpoint operacional restrito a rede interna",
+        )
+
+
 def _run_inactivity_watcher(stop_event: threading.Event) -> None:
     interval_seconds = max(10, settings.inactivity_check_interval_seconds)
     while not stop_event.wait(interval_seconds):
@@ -137,12 +171,14 @@ async def healthcheck() -> dict:
 
 
 @app.get("/health/live")
-async def health_live() -> dict:
+async def health_live(request: Request) -> dict:
+    _enforce_internal_observability_access(request)
     return {"status": "alive", "service": "meta-chatbot"}
 
 
 @app.get("/health/ready")
-async def health_ready() -> dict:
+async def health_ready(request: Request) -> dict:
+    _enforce_internal_observability_access(request)
     if not db.is_ready():
         raise HTTPException(
             status_code=503,
@@ -152,7 +188,8 @@ async def health_ready() -> dict:
 
 
 @app.get("/health/db")
-async def health_db() -> dict:
+async def health_db(request: Request) -> dict:
+    _enforce_internal_observability_access(request)
     db_health = db.healthcheck()
     if not db_health["ready"]:
         raise HTTPException(
@@ -166,7 +203,8 @@ async def health_db() -> dict:
 
 
 @app.get("/metrics")
-async def metrics() -> PlainTextResponse:
+async def metrics(request: Request) -> PlainTextResponse:
+    _enforce_internal_observability_access(request)
     metrics_snapshot = observability_state.snapshot()
     db_health = db.healthcheck()
     db_ready = 1 if db_health["ready"] else 0

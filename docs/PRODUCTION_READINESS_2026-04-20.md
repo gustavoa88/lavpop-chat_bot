@@ -80,7 +80,7 @@ O principal risco não é funcional, e sim de **governança operacional**:
 - [ ] CI de release executa `pytest -q` e `pytest -m integration -q` com Postgres real.
 - [x] Deploy bloqueado por workflow (`Deploy release`) se integração falhar ou baseline de segurança estiver fora do padrão.
 - [x] `/metrics` e `/health/*` acessíveis somente internamente.
-- [ ] Runbook com procedimentos para indisponibilidade de DB e falha de autenticação na Meta.
+- [x] Runbook com procedimentos para indisponibilidade de DB e falha de autenticação na Meta.
 - [ ] Alertas configurados para disponibilidade e erro de processamento.
 
 ## Conclusão
@@ -109,3 +109,123 @@ Para completar a governança de merge em `main`, ainda recomenda-se no GitHub (n
 
 - Branch protection/ruleset exigindo o check `Integration tests (release gate)` para `main`;
 - Bloqueio de merge enquanto esse check estiver falhando ou pendente.
+
+## Runbook operacional — indisponibilidade de DB e falha de autenticação Meta
+
+### Objetivo
+
+Fornecer um procedimento único, rápido e auditável para dois incidentes de alto impacto:
+
+1. indisponibilidade de PostgreSQL;
+2. rejeição de autenticação/assinatura em webhook da Meta.
+
+### Pré-requisitos operacionais
+
+- Dashboard com métricas de erro/latência do webhook e de saúde de banco.
+- Acesso a logs estruturados da API com filtros por `event_key`, `message_id` e status HTTP.
+- Acesso seguro aos segredos: `DATABASE_URL`, `META_APP_SECRET`, `META_VERIFY_TOKEN`.
+- Canal de incidente definido (ex.: Slack/Teams + paging).
+
+### Severidade e gatilhos
+
+#### SEV-1 (crítico)
+
+- webhook indisponível para maioria das requisições por mais de **5 minutos**;
+- falhas 5xx contínuas por indisponibilidade do DB;
+- assinatura Meta rejeitada em **100%** dos eventos por mais de **5 minutos**.
+
+#### SEV-2 (alto)
+
+- aumento consistente de erros de DB com degradação parcial;
+- aumento de 401/403 de assinatura com queda parcial de processamento.
+
+### Incidente A — indisponibilidade de DB (PostgreSQL)
+
+#### Sintomas comuns
+
+- falhas em `/health/readiness` ou `/health/db-health`;
+- aumento de 5xx no webhook;
+- timeouts de conexão/pool esgotado.
+
+#### Procedimento (primeiros 15 minutos)
+
+1. **Abrir incidente e classificar severidade** (SEV-1/SEV-2).
+2. **Confirmar escopo**:
+   - validar `/health/live`, `/health/readiness`, `/health/db-health`;
+   - verificar taxa de erro no webhook e latência p95/p99.
+3. **Checar conectividade e credenciais**:
+   - DNS/rota para host do Postgres;
+   - validade da `DATABASE_URL` (sem rotação incompleta).
+4. **Avaliar saturação de pool**:
+   - conexões ativas vs. limite;
+   - queries longas/bloqueios.
+5. **Mitigação imediata**:
+   - reduzir tráfego na borda (rate limit temporário) se houver tempestade de eventos;
+   - reiniciar somente pods/instâncias afetadas se houver leak de conexão;
+   - escalar vertical/horizontalmente conforme playbook da plataforma.
+6. **Escalonar para time de dados/cloud** se indisponibilidade externa ao app.
+
+#### Critérios de recuperação
+
+- `/health/readiness` e `/health/db-health` estáveis por **15 minutos**;
+- erro do webhook dentro do baseline;
+- sem crescimento anormal de backlog/fila.
+
+#### Ações pós-incidente
+
+- documentar causa raiz (RCA) em até 48h;
+- registrar métricas: tempo de detecção (TTD), mitigação (TTM) e recuperação (TTR);
+- criar ação corretiva (ex.: ajuste de pool, timeout, índice, capacidade do cluster).
+
+### Incidente B — falha de autenticação/assinatura Meta
+
+#### Sintomas comuns
+
+- respostas 401/403 no webhook;
+- logs de “invalid signature” ou “app secret missing/required”;
+- queda brusca no processamento de mensagens entrantes.
+
+#### Procedimento (primeiros 15 minutos)
+
+1. **Abrir incidente e classificar severidade**.
+2. **Validar baseline de segurança em runtime**:
+   - `APP_ENV=prod` (ou `production`);
+   - `META_VALIDATE_SIGNATURE=true`;
+   - `META_REQUIRE_APP_SECRET=true`;
+   - `META_APP_SECRET` definido.
+3. **Conferir integridade de segredo e rotação**:
+   - verificar se houve rotação recente no secret manager;
+   - confirmar sincronização do segredo entre ambiente e app.
+4. **Validar endpoint e headers recebidos**:
+   - confirmar presença do header de assinatura esperado;
+   - revisar se proxy/gateway não removeu headers.
+5. **Mitigação imediata**:
+   - corrigir segredo e redeploy controlado;
+   - se incidente for causado por configuração de borda, aplicar rollback rápido da mudança.
+6. **Revalidar com evento real/sintético** para confirmar aceitação da assinatura.
+
+#### Critérios de recuperação
+
+- taxa de 401/403 de autenticação volta ao baseline por **15 minutos**;
+- eventos voltam a ser processados com sucesso;
+- sem backlog crescente na entrada de webhook.
+
+#### Ações pós-incidente
+
+- registrar RCA com foco em gestão de segredo/configuração;
+- implementar guarda adicional no deploy (validação de variáveis críticas);
+- avaliar dupla validação de configuração antes do go-live (checklist + smoke test).
+
+### Comunicação durante incidentes
+
+- **T+0–5 min:** alerta no canal de incidente com severidade, impacto e owner técnico;
+- **T+15 min:** status update com hipótese principal e mitigação em andamento;
+- **A cada 30 min (SEV-1):** atualização executiva curta;
+- **Encerramento:** resumo do impacto, janela temporal, causa raiz provável e próximos passos.
+
+### Evidências mínimas a coletar
+
+- trecho de logs com erro e timestamp UTC;
+- print/export de métricas de erro/latência;
+- configuração efetiva (sem expor segredo) das variáveis críticas;
+- timeline do incidente (detecção → mitigação → recuperação).

@@ -59,6 +59,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run full unit test suite (release gate)
+        run: pytest -q
+
       - name: Run integration tests against PostgreSQL
         env:
           TEST_POSTGRES_DSN: dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432

@@ -87,3 +87,15 @@ O principal risco não é funcional, e sim de **governança operacional**:
 
 **Recomendação:** ainda **não** classificar como “produção plena” sem os itens P0.  
 Com P0 implementado e validado em CI + ambiente staging, o sistema fica apto para entrada em produção com risco controlado.
+
+## Revalidação (20/04/2026 — ciclo 2)
+
+Reexecução completa dos checks locais após ajustes de CI:
+
+- `pytest -q` → **48 passed, 3 skipped**
+- `pytest -m integration -q` → **3 skipped** (ambiente local sem `TEST_POSTGRES_DSN`)
+- `python -m compileall app tests` → **sucesso**
+
+### Observação
+
+O pipeline já está configurado para executar, no gate de release, a suíte unitária completa (`pytest -q`) e os testes de integração com PostgreSQL (`pytest -m integration -q`) usando service `postgres` no GitHub Actions.

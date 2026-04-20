@@ -99,3 +99,8 @@ Reexecução completa dos checks locais após ajustes de CI:
 ### Observação
 
 O pipeline já está configurado para executar, no gate de release, a suíte unitária completa (`pytest -q`) e os testes de integração com PostgreSQL (`pytest -m integration -q`) usando service `postgres` no GitHub Actions.
+
+Para tornar esse gate **de fato obrigatório antes de merge/deploy**, ainda é necessário configurar no GitHub (nível de repositório):
+
+- Branch protection/ruleset exigindo o check `Integration tests (release gate)` para `main`;
+- Bloqueio de merge enquanto esse check estiver falhando ou pendente.

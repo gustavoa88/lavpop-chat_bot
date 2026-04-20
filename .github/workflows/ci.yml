@@ -30,7 +30,10 @@ jobs:
   integration-release:
     name: Integration tests (release gate)
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    if: >
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/v')
     services:
       postgres:
         image: postgres:16

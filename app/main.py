@@ -84,11 +84,18 @@ def _enforce_production_security_baseline() -> None:
 
 
 def _resolve_request_ip(request: Request) -> str:
-    forwarded_for = (request.headers.get("x-forwarded-for") or "").strip()
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
     if request.client and request.client.host:
-        return request.client.host.strip()
+        client_host = request.client.host.strip()
+    else:
+        client_host = ""
+
+    if settings.trust_proxy_headers and _is_trusted_proxy(client_host):
+        forwarded_for = (request.headers.get("x-forwarded-for") or "").strip()
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+
+    if client_host:
+        return client_host
     return ""
 
 
@@ -102,6 +109,25 @@ def _is_internal_request(request_ip: str) -> bool:
         return False
 
     return parsed_ip.is_private or parsed_ip.is_loopback or parsed_ip.is_link_local
+
+
+def _is_trusted_proxy(request_ip: str) -> bool:
+    if request_ip in {"localhost", "testclient"}:
+        return True
+
+    try:
+        parsed_ip = ipaddress.ip_address(request_ip)
+    except ValueError:
+        return False
+
+    for cidr in settings.trusted_proxy_cidrs:
+        try:
+            if parsed_ip in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            logger.warning("CIDR de proxy confiável inválido ignorado: %s", cidr)
+
+    return False
 
 
 def _enforce_internal_observability_access(request: Request) -> None:

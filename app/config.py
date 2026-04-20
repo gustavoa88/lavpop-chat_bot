@@ -23,6 +23,8 @@ class Settings:
     inactivity_timeout_minutes: int
     inactivity_check_interval_seconds: int
     observability_internal_only: bool = True
+    trust_proxy_headers: bool = False
+    trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
     app_env: str = "dev"
 
 
@@ -45,6 +47,16 @@ def load_settings() -> Settings:
         "yes",
         "on",
     }
+    trust_proxy_headers = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    trusted_proxy_cidrs_raw = os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
+    trusted_proxy_cidrs = tuple(
+        item.strip() for item in trusted_proxy_cidrs_raw.split(",") if item.strip()
+    )
 
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -66,5 +78,7 @@ def load_settings() -> Settings:
         inactivity_timeout_minutes=int(os.getenv("INACTIVITY_TIMEOUT_MINUTES", "15")),
         inactivity_check_interval_seconds=int(os.getenv("INACTIVITY_CHECK_INTERVAL_SECONDS", "60")),
         observability_internal_only=observability_internal_only,
+        trust_proxy_headers=trust_proxy_headers,
+        trusted_proxy_cidrs=trusted_proxy_cidrs,
         app_env=os.getenv("APP_ENV", os.getenv("ENV", "dev")).strip().lower(),
     )

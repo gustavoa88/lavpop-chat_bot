@@ -354,6 +354,27 @@ def test_metrics_exposes_counters_and_database_status(monkeypatch):
     assert "chatbot_database_ready 1" in response.text
 
 
+def test_metrics_returns_403_for_external_origin(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/metrics", headers={"X-Forwarded-For": "8.8.8.8"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Endpoint operacional restrito a rede interna"
+
+
+def test_health_ready_returns_403_for_external_origin(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.is_ready = lambda: True
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/health/ready", headers={"X-Forwarded-For": "1.1.1.1"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Endpoint operacional restrito a rede interna"
+
+
 def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
 

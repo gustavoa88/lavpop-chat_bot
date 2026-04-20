@@ -22,7 +22,8 @@ class Settings:
     db_connect_timeout: int
     inactivity_timeout_minutes: int
     inactivity_check_interval_seconds: int
-    app_env: str
+    observability_internal_only: bool = True
+    app_env: str = "dev"
 
 
 def load_settings() -> Settings:
@@ -33,6 +34,12 @@ def load_settings() -> Settings:
         "on",
     }
     require_app_secret = os.getenv("META_REQUIRE_APP_SECRET", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    observability_internal_only = os.getenv("OBSERVABILITY_INTERNAL_ONLY", "true").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -58,5 +65,6 @@ def load_settings() -> Settings:
         db_connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT", "3")),
         inactivity_timeout_minutes=int(os.getenv("INACTIVITY_TIMEOUT_MINUTES", "15")),
         inactivity_check_interval_seconds=int(os.getenv("INACTIVITY_CHECK_INTERVAL_SECONDS", "60")),
+        observability_internal_only=observability_internal_only,
         app_env=os.getenv("APP_ENV", os.getenv("ENV", "dev")).strip().lower(),
     )

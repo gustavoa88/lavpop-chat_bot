@@ -79,7 +79,7 @@ O principal risco não é funcional, e sim de **governança operacional**:
 
 - [ ] CI de release executa `pytest -q` e `pytest -m integration -q` com Postgres real.
 - [x] Deploy bloqueado por workflow (`Deploy release`) se integração falhar ou baseline de segurança estiver fora do padrão.
-- [ ] `/metrics` e `/health/*` acessíveis somente internamente.
+- [x] `/metrics` e `/health/*` acessíveis somente internamente.
 - [ ] Runbook com procedimentos para indisponibilidade de DB e falha de autenticação na Meta.
 - [ ] Alertas configurados para disponibilidade e erro de processamento.
 

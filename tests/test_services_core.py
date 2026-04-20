@@ -152,3 +152,53 @@ def test_close_inactive_conversations_sends_message_and_updates_status(monkeypat
     assert closed == 1
     assert len(service.db.logged) == 1
     assert any("encerrado_inatividade" in call[0] for call in service.db.executed)
+
+
+def test_save_context_reactivates_closed_context():
+    class FakeDbSaveContext:
+        def __init__(self):
+            self.last_query = ""
+            self.last_params = ()
+
+        def fetchall(self, query, params=()):
+            return []
+
+        def fetchone(self, query, params=()):
+            return None
+
+        def execute(self, query, params=()):
+            self.last_query = query
+            self.last_params = params
+
+    settings = DummySettings(
+        openai_api_key="",
+        openai_model="gpt-4.1-mini",
+        meta_verify_token="verify-token",
+        meta_whatsapp_token="",
+        meta_phone_number_id="",
+        meta_app_secret="",
+        meta_validate_signature=True,
+        meta_require_app_secret=False,
+        db_host="127.0.0.1",
+        db_port=5432,
+        db_name="lavpop_chatbot",
+        db_user="postgres",
+        db_password="postgres",
+        db_min_conn=1,
+        db_max_conn=5,
+        db_connect_timeout=3,
+        inactivity_timeout_minutes=15,
+        inactivity_check_interval_seconds=60,
+    )
+    fake_db = FakeDbSaveContext()
+    service = ChatService(fake_db, settings)
+
+    service.save_context(
+        phone="5511999999999",
+        name="Cliente Teste",
+        intent="menu_inicial",
+        subject="menu_inicial",
+        response_type="menu_boas_vindas",
+    )
+
+    assert "status = 'ativo'" in fake_db.last_query

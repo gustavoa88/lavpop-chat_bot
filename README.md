@@ -173,6 +173,8 @@ pytest -m integration -q
 
 > Os testes de integração são automaticamente ignorados localmente quando `TEST_POSTGRES_DSN` não está definido.
 > No CI de release (branch `main`/tags `v*`), a suíte de integração com PostgreSQL é obrigatória como gate.
+>
+> O job `Deploy release (blocked by integration gate)` só executa depois dos jobs `tests` + `Integration tests (release gate)` com sucesso e ainda valida baseline estrito de segurança via secrets (`APP_ENV`, `META_VALIDATE_SIGNATURE`, `META_REQUIRE_APP_SECRET`, `META_APP_SECRET`).
 
 ## 11) Ajuste rápido da regra `o_que_lavar` (PostgreSQL)
 

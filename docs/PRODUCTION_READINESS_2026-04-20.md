@@ -78,7 +78,7 @@ O principal risco não é funcional, e sim de **governança operacional**:
 ## Checklist mínimo de produção (resumo)
 
 - [ ] CI de release executa `pytest -q` e `pytest -m integration -q` com Postgres real.
-- [ ] Deploy bloqueado se baseline de segurança em produção estiver fora do padrão.
+- [x] Deploy bloqueado por workflow (`Deploy release`) se integração falhar ou baseline de segurança estiver fora do padrão.
 - [ ] `/metrics` e `/health/*` acessíveis somente internamente.
 - [ ] Runbook com procedimentos para indisponibilidade de DB e falha de autenticação na Meta.
 - [ ] Alertas configurados para disponibilidade e erro de processamento.
@@ -100,7 +100,12 @@ Reexecução completa dos checks locais após ajustes de CI:
 
 O pipeline já está configurado para executar, no gate de release, a suíte unitária completa (`pytest -q`) e os testes de integração com PostgreSQL (`pytest -m integration -q`) usando service `postgres` no GitHub Actions.
 
-Para tornar esse gate **de fato obrigatório antes de merge/deploy**, ainda é necessário configurar no GitHub (nível de repositório):
+O bloqueio de deploy já está implementado no workflow:
+
+- Job `Deploy release (blocked by integration gate)` depende de `tests` + `Integration tests (release gate)` (`needs`).
+- O deploy é abortado se baseline estrito de segurança não estiver conforme (`APP_ENV` prod/production, assinatura validada e App Secret obrigatório).
+
+Para completar a governança de merge em `main`, ainda recomenda-se no GitHub (nível de repositório):
 
 - Branch protection/ruleset exigindo o check `Integration tests (release gate)` para `main`;
 - Bloqueio de merge enquanto esse check estiver falhando ou pendente.

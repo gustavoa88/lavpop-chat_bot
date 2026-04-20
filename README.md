@@ -117,7 +117,7 @@ No painel da Meta, configure:
 7. Salva `chatbot.log_conversas` e atualiza `chatbot.contexto_cliente`.
 8. Envia resposta para o usuário via Graph API da Meta.
 9. Aplica idempotência por mensagem do webhook (deduplicação por `messages[].id` com fallback por hash), evitando resposta duplicada em reentregas da Meta.
-10. Monitora clientes com status `ativo` e, após `15` minutos sem interação (configurável), envia uma mensagem gentil de encerramento convidando para voltar à lavanderia.
+10. Monitora clientes com status `ativo` e, após `INACTIVITY_TIMEOUT_MINUTES` minutos sem interação (padrão `15`, configurável via `.env`), envia uma mensagem gentil de encerramento convidando para voltar à lavanderia.
 
 ## 8) Próximos passos recomendados
 

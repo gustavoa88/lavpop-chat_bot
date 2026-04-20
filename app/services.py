@@ -427,6 +427,7 @@ class ChatService:
             DO UPDATE SET
                 nome = EXCLUDED.nome,
                 ultima_interacao = NOW(),
+                status = 'ativo',
                 ultima_intencao = EXCLUDED.ultima_intencao,
                 ultimo_assunto = EXCLUDED.ultimo_assunto,
                 ultima_resposta_tipo = EXCLUDED.ultima_resposta_tipo,

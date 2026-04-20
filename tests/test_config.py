@@ -43,3 +43,23 @@ def test_load_settings_reads_observability_internal_only_from_env(monkeypatch):
     settings = load_settings()
 
     assert settings.observability_internal_only is False
+
+
+def test_load_settings_uses_proxy_header_defaults(monkeypatch):
+    monkeypatch.delenv("TRUST_PROXY_HEADERS", raising=False)
+    monkeypatch.delenv("TRUSTED_PROXY_CIDRS", raising=False)
+
+    settings = load_settings()
+
+    assert settings.trust_proxy_headers is False
+    assert settings.trusted_proxy_cidrs == ("127.0.0.1/32", "::1/128")
+
+
+def test_load_settings_reads_proxy_header_values_from_env(monkeypatch):
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.168.0.0/16")
+
+    settings = load_settings()
+
+    assert settings.trust_proxy_headers is True
+    assert settings.trusted_proxy_cidrs == ("10.0.0.0/8", "192.168.0.0/16")

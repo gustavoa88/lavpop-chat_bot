@@ -355,6 +355,7 @@ def test_metrics_exposes_counters_and_database_status(monkeypatch):
 
 
 def test_metrics_returns_403_for_external_origin(monkeypatch):
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "true")
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
 
     with TestClient(main_module.app) as client:
@@ -365,6 +366,7 @@ def test_metrics_returns_403_for_external_origin(monkeypatch):
 
 
 def test_health_ready_returns_403_for_external_origin(monkeypatch):
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "true")
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.is_ready = lambda: True
 
@@ -373,6 +375,16 @@ def test_health_ready_returns_403_for_external_origin(monkeypatch):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Endpoint operacional restrito a rede interna"
+
+
+def test_metrics_ignores_x_forwarded_for_by_default(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    main_module.db.healthcheck = lambda: {"ready": True, "latency_ms": 1.23}
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/metrics", headers={"X-Forwarded-For": "8.8.8.8"})
+
+    assert response.status_code == 200
 
 
 def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypatch):

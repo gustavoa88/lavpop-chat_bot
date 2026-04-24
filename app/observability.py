@@ -12,6 +12,7 @@ class ObservabilityState:
         self._lock = threading.Lock()
         self.webhook_total = 0
         self.messages_processed_total = 0
+        self.messages_recorded_total = 0
         self.messages_ignored_total = 0
         self.messages_duplicate_total = 0
         self.processing_errors_total = 0
@@ -24,6 +25,10 @@ class ObservabilityState:
     def mark_processed(self) -> None:
         with self._lock:
             self.messages_processed_total += 1
+
+    def mark_recorded(self) -> None:
+        with self._lock:
+            self.messages_recorded_total += 1
 
     def mark_ignored(self) -> None:
         with self._lock:
@@ -46,6 +51,7 @@ class ObservabilityState:
             return {
                 "webhook_total": float(self.webhook_total),
                 "messages_processed_total": float(self.messages_processed_total),
+                "messages_recorded_total": float(self.messages_recorded_total),
                 "messages_ignored_total": float(self.messages_ignored_total),
                 "messages_duplicate_total": float(self.messages_duplicate_total),
                 "processing_errors_total": float(self.processing_errors_total),
@@ -63,6 +69,9 @@ def build_prometheus_metrics(snapshot: dict[str, float], db_ready: bool, db_late
         "# HELP chatbot_messages_processed_total Total de mensagens processadas com resposta.",
         "# TYPE chatbot_messages_processed_total counter",
         f"chatbot_messages_processed_total {int(snapshot['messages_processed_total'])}",
+        "# HELP chatbot_messages_recorded_total Total de mensagens registradas sem resposta automática.",
+        "# TYPE chatbot_messages_recorded_total counter",
+        f"chatbot_messages_recorded_total {int(snapshot['messages_recorded_total'])}",
         "# HELP chatbot_messages_ignored_total Total de mensagens ignoradas por payload inválido.",
         "# TYPE chatbot_messages_ignored_total counter",
         f"chatbot_messages_ignored_total {int(snapshot['messages_ignored_total'])}",

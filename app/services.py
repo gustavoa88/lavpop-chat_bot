@@ -272,6 +272,10 @@ class ChatService:
         self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
         self._meta_send_blocked_until = 0.0
 
+    def _debug_log(self, message: str, *args) -> None:
+        if self.settings.app_debug_log_mode:
+            logger.info("[debug_log_mode] " + message, *args)
+
     def _active_rules(self) -> list[dict]:
         return self.db.fetchall(
             """
@@ -666,6 +670,12 @@ class ChatService:
             "type": "text",
             "text": {"body": text},
         }
+        self._debug_log(
+            "Tentativa envio Meta text. destino=%s endpoint_phone_number_id=%s text_preview=%s",
+            _phone_log_id(destination),
+            self.settings.meta_phone_number_id or "ausente",
+            (text or "").strip()[:120],
+        )
 
         req = urllib.request.Request(
             url=url,
@@ -680,7 +690,13 @@ class ChatService:
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                with urllib.request.urlopen(req, timeout=10):
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    response_body = response.read().decode("utf-8", errors="replace")
+                    self._debug_log(
+                        "Resposta Meta text success. status=%s body=%s",
+                        getattr(response, "status", "n/a"),
+                        response_body[:400],
+                    )
                     logger.info("Mensagem enviada com sucesso para %s", _phone_log_id(destination))
                     return True
 
@@ -717,6 +733,7 @@ class ChatService:
                     _phone_log_id(destination),
                     details or "-",
                 )
+                self._debug_log("HTTPError Meta text payload=%s", json.dumps(payload, ensure_ascii=False)[:400])
                 return False
 
             except (URLError, TimeoutError) as exc:
@@ -779,6 +796,11 @@ class ChatService:
                 },
             },
         }
+        self._debug_log(
+            "Tentativa envio Meta menu. destino=%s endpoint_phone_number_id=%s",
+            _phone_log_id(destination),
+            self.settings.meta_phone_number_id or "ausente",
+        )
 
         req = urllib.request.Request(
             url=url,
@@ -791,7 +813,13 @@ class ChatService:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=10):
+            with urllib.request.urlopen(req, timeout=10) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+                self._debug_log(
+                    "Resposta Meta menu success. status=%s body=%s",
+                    getattr(response, "status", "n/a"),
+                    response_body[:400],
+                )
                 logger.info("Menu interativo enviado com sucesso para %s", _phone_log_id(destination))
                 return True
         except HTTPError as exc:

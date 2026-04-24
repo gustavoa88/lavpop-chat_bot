@@ -104,6 +104,11 @@ def _message_preview(message: str, limit: int = 80) -> str:
     return compact[: limit - 3] + "..."
 
 
+def _debug_log(message: str, *args) -> None:
+    if settings.app_debug_log_mode:
+        logger.info("[debug_log_mode] " + message, *args)
+
+
 def _is_db_not_initialized_error(exc: Exception) -> bool:
     return isinstance(exc, RuntimeError) and str(exc) == "Database pool not initialized"
 
@@ -391,6 +396,14 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
 
     context = _best_effort_persistence("get_customer_context", lambda: chat_service.get_customer_context(phone)) or {}
     decision = conversation_router.decide(incoming_text, context)
+    _debug_log(
+        "Decisão do roteador. event_key=%s mode_anterior=%s mode_novo=%s action=%s reason=%s",
+        event_key,
+        (context.get("modo_conversa") or "bot"),
+        decision.mode,
+        decision.action,
+        decision.reason,
+    )
     if decision.mode != (context.get("modo_conversa") or "bot"):
         _best_effort_persistence(
             "set_conversation_mode",
@@ -525,8 +538,16 @@ async def _process_meta_webhook(request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Payload JSON inválido") from exc
 
     logger.info("Webhook recebido. summary=%s payload_hash=%s", _payload_summary(payload), payload_hash[:12])
+    _debug_log("Webhook bruto (preview): %s", _message_preview(raw_body.decode("utf-8", errors="replace"), limit=400))
 
     for event in parse_meta_message_events(payload):
+        _debug_log(
+            "Evento parseado. type=%s phone=%s text_preview=%s keys=%s",
+            event.msg_type,
+            _phone_log_id(event.phone),
+            _message_preview(event.incoming_text),
+            sorted(list(event.message_obj.keys())),
+        )
         try:
             result = await run_in_threadpool(_handle_meta_message_event, event, payload_hash)
             if result == "processed":

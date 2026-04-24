@@ -65,6 +65,14 @@ def test_load_settings_reads_proxy_header_values_from_env(monkeypatch):
     assert settings.trusted_proxy_cidrs == ("10.0.0.0/8", "192.168.0.0/16")
 
 
+def test_load_settings_reads_app_debug_log_mode_from_env(monkeypatch):
+    monkeypatch.setenv("APP_DEBUG_LOG_MODE", "true")
+
+    settings = load_settings()
+
+    assert settings.app_debug_log_mode is True
+
+
 def test_load_settings_uses_database_url_when_present(monkeypatch):
     monkeypatch.setenv(
         "DATABASE_URL",

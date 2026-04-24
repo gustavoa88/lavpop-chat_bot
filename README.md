@@ -49,6 +49,7 @@ Preencha:
 - `INACTIVITY_CHECK_INTERVAL_SECONDS` (padrão: `60`)
 - `OBSERVABILITY_INTERNAL_ONLY` (`true`/`false`, padrão: `true`) para restringir `/metrics` e `/health/*` a rede interna
 - `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
+- `APP_DEBUG_LOG_MODE` (`true`/`false`, padrão: `false`) para habilitar logs detalhados de diagnóstico (payload recebido, decisão do roteador e resposta da Meta)
 
 > Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
 > modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
@@ -137,6 +138,18 @@ No painel da Meta, configure:
 - Criar painel administrativo para manter FAQ e intenções.
 
 ## 9) Troubleshooting rápido (erro 401 da Meta)
+
+Para diagnóstico aprofundado de webhook/envio, ative temporariamente:
+
+```bash
+APP_DEBUG_LOG_MODE=true
+```
+
+Com esse modo ativo, o backend adiciona logs com prefixo `[debug_log_mode]` contendo:
+- preview do payload bruto recebido no webhook
+- evento parseado (tipo/chaves)
+- decisão do roteador (modo anterior/novo, ação e motivo)
+- resposta da Meta no envio de mensagens/menu (status + body resumido)
 
 Se o log mostrar `Authentication Error` com `code=190` ao enviar mensagem, o webhook está chegando,
 mas o token de envio para Graph API falhou na autenticação.

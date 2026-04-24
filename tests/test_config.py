@@ -63,3 +63,33 @@ def test_load_settings_reads_proxy_header_values_from_env(monkeypatch):
 
     assert settings.trust_proxy_headers is True
     assert settings.trusted_proxy_cidrs == ("10.0.0.0/8", "192.168.0.0/16")
+
+
+def test_load_settings_uses_database_url_when_present(monkeypatch):
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://chatbot_user:secret_pw@192.168.10.50:5433/lavpop_chatbot_prod",
+    )
+    monkeypatch.setenv("DB_HOST", "127.0.0.1")
+    monkeypatch.setenv("DB_PORT", "5432")
+    monkeypatch.setenv("DB_NAME", "lavpop_chatbot")
+    monkeypatch.setenv("DB_USER", "postgres")
+    monkeypatch.setenv("DB_PASSWORD", "postgres")
+
+    settings = load_settings()
+
+    assert settings.db_host == "192.168.10.50"
+    assert settings.db_port == 5433
+    assert settings.db_name == "lavpop_chatbot_prod"
+    assert settings.db_user == "chatbot_user"
+    assert settings.db_password == "secret_pw"
+
+
+def test_load_settings_database_url_invalid_schema_raises_value_error(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "mysql://root:root@localhost:3306/lavpop")
+
+    try:
+        load_settings()
+        assert False, "Era esperado ValueError para DATABASE_URL inválida"
+    except ValueError as exc:
+        assert "DATABASE_URL inválida" in str(exc)

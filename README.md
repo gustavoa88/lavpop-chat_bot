@@ -44,7 +44,7 @@ Preencha:
 - `META_APP_SECRET` (App Secret da Meta para validar assinatura HMAC do webhook)
 - `META_VALIDATE_SIGNATURE` (`true`/`false`, padrão: `true`)
 - `META_REQUIRE_APP_SECRET` (`true`/`false`, padrão: `false`)
-- dados do PostgreSQL (`DB_*`)
+- dados do PostgreSQL (`DB_*`) **ou** `DATABASE_URL` (quando definido, tem precedência)
 - `INACTIVITY_TIMEOUT_MINUTES` (padrão: `15`)
 - `INACTIVITY_CHECK_INTERVAL_SECONDS` (padrão: `60`)
 - `OBSERVABILITY_INTERNAL_ONLY` (`true`/`false`, padrão: `true`) para restringir `/metrics` e `/health/*` a rede interna

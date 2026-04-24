@@ -98,6 +98,23 @@ def _message_preview(message: str, limit: int = 80) -> str:
     return compact[: limit - 3] + "..."
 
 
+def _is_db_not_initialized_error(exc: Exception) -> bool:
+    return isinstance(exc, RuntimeError) and str(exc) == "Database pool not initialized"
+
+
+def _best_effort_persistence(operation: str, fn):
+    try:
+        return fn()
+    except Exception as exc:
+        if _is_db_not_initialized_error(exc):
+            logger.warning(
+                "Persistência indisponível (%s) por pool de banco não inicializado; seguindo processamento.",
+                operation,
+            )
+            return None
+        raise
+
+
 def _enforce_production_security_baseline() -> None:
     if settings.app_env in {"prod", "production"} and not settings.meta_require_app_secret:
         raise RuntimeError(
@@ -344,23 +361,32 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
         _message_preview(incoming_text),
     )
 
-    chat_service.save_message(
-        event_key=event_key,
-        phone=phone,
-        name=contact_name,
-        direction="inbound",
-        origin="cliente",
-        message_type=msg_type,
-        text=incoming_text,
-        payload=message_obj,
-        status="received",
+    _best_effort_persistence(
+        "save_message_inbound",
+        lambda: chat_service.save_message(
+            event_key=event_key,
+            phone=phone,
+            name=contact_name,
+            direction="inbound",
+            origin="cliente",
+            message_type=msg_type,
+            text=incoming_text,
+            payload=message_obj,
+            status="received",
+        ),
     )
-    chat_service.touch_inbound_context(phone, contact_name, source="cliente")
+    _best_effort_persistence(
+        "touch_inbound_context",
+        lambda: chat_service.touch_inbound_context(phone, contact_name, source="cliente"),
+    )
 
-    context = chat_service.get_customer_context(phone)
+    context = _best_effort_persistence("get_customer_context", lambda: chat_service.get_customer_context(phone)) or {}
     decision = conversation_router.decide(incoming_text, context)
-    if decision.mode != ((context or {}).get("modo_conversa") or "bot"):
-        chat_service.set_conversation_mode(phone, contact_name, decision.mode, decision.reason)
+    if decision.mode != (context.get("modo_conversa") or "bot"):
+        _best_effort_persistence(
+            "set_conversation_mode",
+            lambda: chat_service.set_conversation_mode(phone, contact_name, decision.mode, decision.reason),
+        )
 
     if decision.action == REGISTER_ONLY_ACTION:
         logger.info(
@@ -374,25 +400,31 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
 
     if decision.action == HANDOFF_ACTION:
         answer = decision.answer or ""
-        chat_service.save_log(
-            phone=phone,
-            name=contact_name,
-            client_msg=incoming_text,
-            bot_msg=answer,
-            source="roteador",
-            rule_name=decision.reason,
+        _best_effort_persistence(
+            "save_log_handoff",
+            lambda: chat_service.save_log(
+                phone=phone,
+                name=contact_name,
+                client_msg=incoming_text,
+                bot_msg=answer,
+                source="roteador",
+                rule_name=decision.reason,
+            ),
         )
         sent = _send_answer(phone, answer)
-        chat_service.save_message(
-            phone=phone,
-            name=contact_name,
-            direction="outbound",
-            origin="bot",
-            text=answer,
-            status="sent" if sent else "send_failed",
-            response_source="roteador",
-            rule_name=decision.reason,
-            intent="handoff_humano",
+        _best_effort_persistence(
+            "save_message_outbound_handoff",
+            lambda: chat_service.save_message(
+                phone=phone,
+                name=contact_name,
+                direction="outbound",
+                origin="bot",
+                text=answer,
+                status="sent" if sent else "send_failed",
+                response_source="roteador",
+                rule_name=decision.reason,
+                intent="handoff_humano",
+            ),
         )
         if not sent:
             logger.error(
@@ -423,16 +455,19 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
 
     answer, source, rule_name, intent = chat_service.answer_message(phone, contact_name, incoming_text)
     sent = _send_answer(phone, answer)
-    chat_service.save_message(
-        phone=phone,
-        name=contact_name,
-        direction="outbound",
-        origin="bot",
-        text=answer,
-        status="sent" if sent else "send_failed",
-        response_source=source,
-        rule_name=rule_name,
-        intent=intent,
+    _best_effort_persistence(
+        "save_message_outbound_bot",
+        lambda: chat_service.save_message(
+            phone=phone,
+            name=contact_name,
+            direction="outbound",
+            origin="bot",
+            text=answer,
+            status="sent" if sent else "send_failed",
+            response_source=source,
+            rule_name=rule_name,
+            intent=intent,
+        ),
     )
     if not sent:
         logger.error(

@@ -213,6 +213,22 @@ class Database:
                 )
                 self._dedup_table_warning_logged = True
             return True
+        except RuntimeError as exc:
+            if str(exc) == "Database pool not initialized":
+                if not self._dedup_table_warning_logged:
+                    logger.warning(
+                        "Pool de banco não inicializado ao registrar deduplicação de webhook. "
+                        "Prosseguindo sem idempotência em modo compatibilidade."
+                    )
+                    self._dedup_table_warning_logged = True
+                return True
+            raise
+        except Exception:
+            logger.exception(
+                "Falha inesperada ao registrar deduplicação de webhook. "
+                "Prosseguindo sem idempotência em modo compatibilidade."
+            )
+            return True
 
     def is_ready(self) -> bool:
         try:

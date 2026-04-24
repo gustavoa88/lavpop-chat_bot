@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.conversation_router import REGISTER_ONLY_ACTION, RouteDecision
+
 
 DEFAULT_ENV = {
     "OPENAI_API_KEY": "",
@@ -437,3 +439,53 @@ def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypa
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert answered_messages == [("5511999999999", "2")]
+
+
+def test_post_webhook_meta_register_only_action_increments_recorded_metric(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    main_module.db.try_register_webhook_event = lambda **kwargs: True
+    main_module.chat_service.send_meta_message = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("Não deve enviar mensagem quando ação for apenas registrar")
+    )
+    main_module.chat_service.send_meta_menu_message = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("Não deve enviar menu quando ação for apenas registrar")
+    )
+    main_module.conversation_router.decide = lambda *_args, **_kwargs: RouteDecision(
+        action=REGISTER_ONLY_ACTION,
+        mode="bot",
+        reason="teste_registro_sem_resposta",
+    )
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Cliente"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.register_only",
+                                    "from": "5511999999999",
+                                    "timestamp": "1710000222",
+                                    "type": "text",
+                                    "text": {"body": "apenas registrar"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    with TestClient(main_module.app) as client:
+        webhook_response = client.post("/webhook/meta", json=payload)
+        metrics_response = client.get("/metrics")
+
+    assert webhook_response.status_code == 200
+    assert webhook_response.json() == {"status": "ok"}
+    assert metrics_response.status_code == 200
+    assert "chatbot_messages_recorded_total 1" in metrics_response.text
+    assert "chatbot_message_processing_errors_total 0" in metrics_response.text

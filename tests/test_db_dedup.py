@@ -166,6 +166,18 @@ def test_try_register_webhook_event_allows_processing_when_table_is_missing():
     assert should_process is True
 
 
+
+
+def test_try_register_webhook_event_allows_processing_when_pool_not_initialized(caplog):
+    db = Database(_build_settings())
+
+    should_process = db.try_register_webhook_event(
+        event_key="meta_msg_id:pool",
+        payload_hash="0" * 64,
+    )
+
+    assert should_process is True
+    assert "Pool de banco não inicializado" in caplog.text
 def test_ensure_minimum_schema_creates_webhook_dedup_objects():
     db = Database(_build_settings())
     fake_conn = _ConnectionCollectingStatements(fetchone_values=[(None,)])

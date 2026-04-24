@@ -7,12 +7,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 import logging
+from starlette.concurrency import run_in_threadpool
 
 from app.config import load_settings
+from app.conversation_router import BOT_ACTION, HANDOFF_ACTION, REGISTER_ONLY_ACTION, ConversationRouter
 from app.db import Database
 from app.network_security import enforce_internal_observability_access
 from app.observability import ObservabilityState, build_prometheus_metrics
 from app.services import ChatService, PROACTIVE_MENU_MESSAGE
+from app.webhook_parser import ParsedMessageEvent
 from app.webhook_parser import parse_meta_message_events
 from app.webhook_security import (
     build_message_event_key,
@@ -28,10 +31,71 @@ logger = logging.getLogger("meta_chatbot")
 settings = load_settings()
 db = Database(settings)
 chat_service = ChatService(db, settings)
+conversation_router = ConversationRouter()
 _meta_signature_secret_missing_logged = False
 
 
-observability_state = ObservabilityState()
+class _ObservabilityState:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.webhook_total = 0
+        self.messages_processed_total = 0
+        self.messages_ignored_total = 0
+        self.messages_duplicate_total = 0
+        self.processing_errors_total = 0
+        self.last_processing_seconds = 0.0
+
+    def mark_webhook(self) -> None:
+        with self._lock:
+            self.webhook_total += 1
+
+    def mark_processed(self) -> None:
+        with self._lock:
+            self.messages_processed_total += 1
+
+    def mark_ignored(self) -> None:
+        with self._lock:
+            self.messages_ignored_total += 1
+
+    def mark_duplicate(self) -> None:
+        with self._lock:
+            self.messages_duplicate_total += 1
+
+    def mark_error(self) -> None:
+        with self._lock:
+            self.processing_errors_total += 1
+
+    def set_last_processing_seconds(self, seconds: float) -> None:
+        with self._lock:
+            self.last_processing_seconds = seconds
+
+    def snapshot(self) -> dict[str, float]:
+        with self._lock:
+            return {
+                "webhook_total": float(self.webhook_total),
+                "messages_processed_total": float(self.messages_processed_total),
+                "messages_ignored_total": float(self.messages_ignored_total),
+                "messages_duplicate_total": float(self.messages_duplicate_total),
+                "processing_errors_total": float(self.processing_errors_total),
+                "last_processing_seconds": self.last_processing_seconds,
+            }
+
+
+observability_state = _ObservabilityState()
+
+
+def _phone_log_id(phone: str) -> str:
+    phone = (phone or "").strip()
+    if not phone:
+        return "ausente"
+    return f"phone_hash:{hashlib.sha256(phone.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _message_preview(message: str, limit: int = 80) -> str:
+    compact = " ".join((message or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
 
 
 def _enforce_production_security_baseline() -> None:
@@ -143,21 +207,46 @@ async def metrics(request: Request) -> PlainTextResponse:
     _enforce_internal_observability_access(request)
     metrics_snapshot = observability_state.snapshot()
     db_health = db.healthcheck()
-    metrics_payload = build_prometheus_metrics(
-        snapshot=metrics_snapshot,
-        db_ready=db_health["ready"],
-        db_latency_ms=db_health["latency_ms"],
-    )
-    return PlainTextResponse(content=metrics_payload)
+    db_ready = 1 if db_health["ready"] else 0
+    db_latency_ms = db_health["latency_ms"]
+
+    lines = [
+        "# HELP chatbot_webhook_requests_total Total de webhooks recebidos.",
+        "# TYPE chatbot_webhook_requests_total counter",
+        f"chatbot_webhook_requests_total {int(metrics_snapshot['webhook_total'])}",
+        "# HELP chatbot_messages_processed_total Total de mensagens processadas com resposta.",
+        "# TYPE chatbot_messages_processed_total counter",
+        f"chatbot_messages_processed_total {int(metrics_snapshot['messages_processed_total'])}",
+        "# HELP chatbot_messages_ignored_total Total de mensagens ignoradas por payload inválido.",
+        "# TYPE chatbot_messages_ignored_total counter",
+        f"chatbot_messages_ignored_total {int(metrics_snapshot['messages_ignored_total'])}",
+        "# HELP chatbot_messages_duplicate_total Total de mensagens descartadas por idempotência.",
+        "# TYPE chatbot_messages_duplicate_total counter",
+        f"chatbot_messages_duplicate_total {int(metrics_snapshot['messages_duplicate_total'])}",
+        "# HELP chatbot_message_processing_errors_total Total de erros no processamento de mensagens.",
+        "# TYPE chatbot_message_processing_errors_total counter",
+        f"chatbot_message_processing_errors_total {int(metrics_snapshot['processing_errors_total'])}",
+        "# HELP chatbot_webhook_last_processing_seconds Duração do último processamento de webhook.",
+        "# TYPE chatbot_webhook_last_processing_seconds gauge",
+        f"chatbot_webhook_last_processing_seconds {metrics_snapshot['last_processing_seconds']:.6f}",
+        "# HELP chatbot_database_ready Estado do banco (1=up, 0=down).",
+        "# TYPE chatbot_database_ready gauge",
+        f"chatbot_database_ready {db_ready}",
+        "# HELP chatbot_database_latency_ms Latência do check de banco em milissegundos.",
+        "# TYPE chatbot_database_latency_ms gauge",
+        f"chatbot_database_latency_ms {db_latency_ms}",
+    ]
+
+    return PlainTextResponse(content="\n".join(lines) + "\n")
 
 
 def _validate_webhook_request(request: Request) -> str:
     mode = request.query_params.get("hub.mode")
     verify_token = request.query_params.get("hub.verify_token")
     logger.info(
-        "Recebida tentativa de verificação do webhook. mode=%s token_recebido=%s",
+        "Recebida tentativa de verificação do webhook. mode=%s token_presente=%s",
         mode,
-        verify_token,
+        bool(verify_token),
     )
     return validate_webhook_challenge(request, settings.meta_verify_token)
 
@@ -186,6 +275,187 @@ def _build_message_event_key(message_obj: dict, phone: str, incoming_text: str, 
     return build_message_event_key(message_obj, phone, incoming_text, msg_type)
 
 
+def _payload_summary(payload: dict) -> dict[str, int]:
+    entries = payload.get("entry", [])
+    changes_count = 0
+    messages_count = 0
+    for entry in entries:
+        changes = entry.get("changes", [])
+        changes_count += len(changes)
+        for change in changes:
+            value = change.get("value", {})
+            messages_count += len(value.get("messages", []))
+
+    return {
+        "entries": len(entries),
+        "changes": changes_count,
+        "messages": messages_count,
+    }
+
+
+def _send_answer(phone: str, answer: str) -> bool:
+    if answer == PROACTIVE_MENU_MESSAGE:
+        sent = chat_service.send_meta_menu_message(phone)
+        if sent:
+            return True
+        logger.info("Fallback para mensagem de texto após falha no menu interativo. destino=%s", _phone_log_id(phone))
+        return chat_service.send_meta_message(phone, answer)
+
+    return chat_service.send_meta_message(phone, answer)
+
+
+def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> str:
+    message_obj = event.message_obj
+    msg_type = event.msg_type
+    phone = event.phone
+    incoming_text = event.incoming_text
+    contact_name = event.contact_name
+    phone_log_id = _phone_log_id(phone)
+
+    if not incoming_text or not phone:
+        logger.info(
+            "Mensagem ignorada por payload incompleto. type=%s phone=%s text_present=%s",
+            msg_type,
+            phone_log_id,
+            bool(incoming_text),
+        )
+        return "ignored"
+
+    event_key = _build_message_event_key(message_obj, phone, incoming_text, msg_type)
+    is_new_event = db.try_register_webhook_event(
+        event_key=event_key,
+        payload_hash=payload_hash,
+        source="meta_webhook_message",
+    )
+    if not is_new_event:
+        logger.info(
+            "Mensagem duplicada ignorada por idempotência. event_key=%s phone=%s",
+            event_key,
+            phone_log_id,
+        )
+        return "duplicate"
+
+    logger.info(
+        "Mensagem recebida. event_key=%s type=%s phone=%s contact_name_present=%s preview=%s",
+        event_key,
+        msg_type,
+        phone_log_id,
+        bool(contact_name),
+        _message_preview(incoming_text),
+    )
+
+    chat_service.save_message(
+        event_key=event_key,
+        phone=phone,
+        name=contact_name,
+        direction="inbound",
+        origin="cliente",
+        message_type=msg_type,
+        text=incoming_text,
+        payload=message_obj,
+        status="received",
+    )
+    chat_service.touch_inbound_context(phone, contact_name, source="cliente")
+
+    context = chat_service.get_customer_context(phone)
+    decision = conversation_router.decide(incoming_text, context)
+    if decision.mode != ((context or {}).get("modo_conversa") or "bot"):
+        chat_service.set_conversation_mode(phone, contact_name, decision.mode, decision.reason)
+
+    if decision.action == REGISTER_ONLY_ACTION:
+        logger.info(
+            "Mensagem registrada sem resposta automática. event_key=%s phone=%s mode=%s reason=%s",
+            event_key,
+            phone_log_id,
+            decision.mode,
+            decision.reason,
+        )
+        return "recorded"
+
+    if decision.action == HANDOFF_ACTION:
+        answer = decision.answer or ""
+        chat_service.save_log(
+            phone=phone,
+            name=contact_name,
+            client_msg=incoming_text,
+            bot_msg=answer,
+            source="roteador",
+            rule_name=decision.reason,
+        )
+        sent = _send_answer(phone, answer)
+        chat_service.save_message(
+            phone=phone,
+            name=contact_name,
+            direction="outbound",
+            origin="bot",
+            text=answer,
+            status="sent" if sent else "send_failed",
+            response_source="roteador",
+            rule_name=decision.reason,
+            intent="handoff_humano",
+        )
+        if not sent:
+            logger.error(
+                "Aviso de handoff gerado, mas envio para Meta falhou. event_key=%s phone=%s reason=%s",
+                event_key,
+                phone_log_id,
+                decision.reason,
+            )
+            return "send_failed"
+
+        logger.info(
+            "Conversa roteada para humano. event_key=%s phone=%s mode=%s reason=%s",
+            event_key,
+            phone_log_id,
+            decision.mode,
+            decision.reason,
+        )
+        return "processed"
+
+    if decision.action != BOT_ACTION:
+        logger.error(
+            "Roteador retornou ação desconhecida. event_key=%s phone=%s action=%s",
+            event_key,
+            phone_log_id,
+            decision.action,
+        )
+        return "routing_error"
+
+    answer, source, rule_name, intent = chat_service.answer_message(phone, contact_name, incoming_text)
+    sent = _send_answer(phone, answer)
+    chat_service.save_message(
+        phone=phone,
+        name=contact_name,
+        direction="outbound",
+        origin="bot",
+        text=answer,
+        status="sent" if sent else "send_failed",
+        response_source=source,
+        rule_name=rule_name,
+        intent=intent,
+    )
+    if not sent:
+        logger.error(
+            "Resposta gerada, mas envio para Meta falhou. event_key=%s phone=%s source=%s rule=%s intent=%s",
+            event_key,
+            phone_log_id,
+            source,
+            rule_name,
+            intent,
+        )
+        return "send_failed"
+
+    logger.info(
+        "Mensagem processada com sucesso. event_key=%s phone=%s source=%s rule=%s intent=%s",
+        event_key,
+        phone_log_id,
+        source,
+        rule_name,
+        intent,
+    )
+    return "processed"
+
+
 @app.get("/webhook")
 async def verify_webhook_root(request: Request):
     challenge = _validate_webhook_request(request)
@@ -210,58 +480,27 @@ async def _process_meta_webhook(request: Request) -> dict:
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="Payload JSON inválido") from exc
 
-    logger.info("Webhook recebido: %s", payload)
+    logger.info("Webhook recebido. summary=%s payload_hash=%s", _payload_summary(payload), payload_hash[:12])
 
     for event in parse_meta_message_events(payload):
         try:
-            message_obj = event.message_obj
-            msg_type = event.msg_type
-            phone = event.phone
-            incoming_text = event.incoming_text
-            contact_name = event.contact_name
-
-            if not incoming_text or not phone:
-                logger.info(
-                    "Mensagem ignorada. type=%s phone=%s text=%s",
-                    msg_type,
-                    phone,
-                    incoming_text,
-                )
+            result = await run_in_threadpool(_handle_meta_message_event, event, payload_hash)
+            if result == "processed":
+                observability_state.mark_processed()
+            elif result == "ignored":
                 observability_state.mark_ignored()
-                continue
-
-            event_key = _build_message_event_key(message_obj, phone, incoming_text, msg_type)
-            is_new_event = db.try_register_webhook_event(
-                event_key=event_key,
-                payload_hash=payload_hash,
-                source="meta_webhook_message",
-            )
-            if not is_new_event:
-                logger.info(
-                    "Mensagem duplicada ignorada por idempotência. event_key=%s phone=%s",
-                    event_key,
-                    phone,
-                )
+            elif result == "duplicate":
                 observability_state.mark_duplicate()
-                continue
-
-            logger.info(
-                "Mensagem recebida de %s (%s): %s",
-                contact_name,
-                phone,
-                incoming_text,
-            )
-
-            answer, _, _, _ = chat_service.answer_message(phone, contact_name, incoming_text)
-            if answer == PROACTIVE_MENU_MESSAGE:
-                sent = chat_service.send_meta_menu_message(phone)
-                if not sent:
-                    chat_service.send_meta_message(phone, answer)
+            elif result == "recorded":
+                observability_state.mark_recorded()
             else:
-                chat_service.send_meta_message(phone, answer)
-            observability_state.mark_processed()
+                observability_state.mark_error()
         except Exception:
-            logger.exception("Falha ao processar mensagem do webhook para contato=%s", event.contact_name)
+            logger.exception(
+                "Falha ao processar mensagem do webhook. phone=%s type=%s",
+                _phone_log_id(event.phone),
+                event.msg_type,
+            )
             observability_state.mark_error()
             continue
 

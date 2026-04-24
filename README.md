@@ -202,3 +202,33 @@ SELECT nome_regra, palavras_chave, resposta
   FROM chatbot.faq_regras
  WHERE nome_regra = 'o_que_lavar';
 ```
+
+## 12) Roteador de conversas (bot + humano)
+
+O webhook agora funciona como roteador:
+
+```text
+Webhook
+  -> salva mensagem em chatbot.mensagens
+  -> consulta modo da conversa em chatbot.contexto_cliente
+  -> bot responde OU atendimento humano assume OU só registra
+```
+
+Para bancos já existentes, aplique a migração incremental:
+
+```bash
+psql -h 127.0.0.1 -U postgres -d lavpop_chatbot -f db/add_conversation_router.sql
+```
+
+Modos principais em `chatbot.contexto_cliente.modo_conversa`:
+
+- `bot`: fluxo automático normal.
+- `aguardando_humano`: cliente pediu atendimento humano; novas mensagens são registradas sem resposta automática.
+- `humano`: atendimento manual assumido; novas mensagens são registradas sem resposta automática.
+- `encerrado`: conversa encerrada; próxima interação volta ao fluxo do bot.
+
+Regras atuais:
+
+- Mensagem `5` ou termos como `atendente`, `falar com humano`, `/humano` e `/pausar` colocam a conversa em `aguardando_humano`.
+- Enquanto a conversa estiver em `aguardando_humano` ou `humano`, o bot não responde automaticamente.
+- `/retomar`, `retomar bot`, `voltar bot` ou `ativar bot` devolvem a conversa ao modo `bot`.

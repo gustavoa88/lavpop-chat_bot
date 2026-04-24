@@ -1,9 +1,19 @@
-# ambiente
+# Python
+__pycache__/
+*.pyc
+
+# Ambiente
 .env
-.env*
+venv/
 
-# backups
-*_bkp_*
+# Codex
+.codex/
 
-# binários
+# VSCode
+.vscode/
+
+
+# BKP
 *.deb
+*_bkp*
+main_bkp_*.py

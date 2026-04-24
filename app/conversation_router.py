@@ -13,6 +13,10 @@ HANDOFF_ACTION = "handoff"
 
 
 HUMAN_HANDOFF_MESSAGE = PROACTIVE_MENU_OPTIONS["5"]["fallback"]
+HUMAN_MODE_WAITING_MESSAGE = (
+    "Seu atendimento está em modo humano no momento. "
+    "Se quiser voltar a falar comigo agora, envie *retomar* 🙂"
+)
 
 
 @dataclass(frozen=True)
@@ -77,9 +81,10 @@ class ConversationRouter:
 
         if mode in {HUMAN_MODE, WAITING_HUMAN_MODE}:
             return RouteDecision(
-                action=REGISTER_ONLY_ACTION,
+                action=HANDOFF_ACTION,
                 mode=mode,
                 reason=f"conversa_em_modo_{mode}",
+                answer=HUMAN_MODE_WAITING_MESSAGE,
             )
 
         return RouteDecision(

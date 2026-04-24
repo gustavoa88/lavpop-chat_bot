@@ -1,6 +1,4 @@
 import hashlib
-import hmac
-import ipaddress
 import json
 import threading
 import time
@@ -12,8 +10,15 @@ import logging
 
 from app.config import load_settings
 from app.db import Database
+from app.network_security import enforce_internal_observability_access
+from app.observability import ObservabilityState, build_prometheus_metrics
 from app.services import ChatService, PROACTIVE_MENU_MESSAGE
 from app.webhook_parser import parse_meta_message_events
+from app.webhook_security import (
+    build_message_event_key,
+    validate_meta_signature,
+    validate_webhook_challenge,
+)
 
 load_dotenv()
 
@@ -26,53 +31,7 @@ chat_service = ChatService(db, settings)
 _meta_signature_secret_missing_logged = False
 
 
-class _ObservabilityState:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self.webhook_total = 0
-        self.messages_processed_total = 0
-        self.messages_ignored_total = 0
-        self.messages_duplicate_total = 0
-        self.processing_errors_total = 0
-        self.last_processing_seconds = 0.0
-
-    def mark_webhook(self) -> None:
-        with self._lock:
-            self.webhook_total += 1
-
-    def mark_processed(self) -> None:
-        with self._lock:
-            self.messages_processed_total += 1
-
-    def mark_ignored(self) -> None:
-        with self._lock:
-            self.messages_ignored_total += 1
-
-    def mark_duplicate(self) -> None:
-        with self._lock:
-            self.messages_duplicate_total += 1
-
-    def mark_error(self) -> None:
-        with self._lock:
-            self.processing_errors_total += 1
-
-    def set_last_processing_seconds(self, seconds: float) -> None:
-        with self._lock:
-            self.last_processing_seconds = seconds
-
-    def snapshot(self) -> dict[str, float]:
-        with self._lock:
-            return {
-                "webhook_total": float(self.webhook_total),
-                "messages_processed_total": float(self.messages_processed_total),
-                "messages_ignored_total": float(self.messages_ignored_total),
-                "messages_duplicate_total": float(self.messages_duplicate_total),
-                "processing_errors_total": float(self.processing_errors_total),
-                "last_processing_seconds": self.last_processing_seconds,
-            }
-
-
-observability_state = _ObservabilityState()
+observability_state = ObservabilityState()
 
 
 def _enforce_production_security_baseline() -> None:
@@ -83,63 +42,14 @@ def _enforce_production_security_baseline() -> None:
         )
 
 
-def _resolve_request_ip(request: Request) -> str:
-    if request.client and request.client.host:
-        client_host = request.client.host.strip()
-    else:
-        client_host = ""
-
-    if settings.trust_proxy_headers and _is_trusted_proxy(client_host):
-        forwarded_for = (request.headers.get("x-forwarded-for") or "").strip()
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-
-    if client_host:
-        return client_host
-    return ""
-
-
-def _is_internal_request(request_ip: str) -> bool:
-    if request_ip in {"localhost", "testclient"}:
-        return True
-
-    try:
-        parsed_ip = ipaddress.ip_address(request_ip)
-    except ValueError:
-        return False
-
-    return parsed_ip.is_private or parsed_ip.is_loopback or parsed_ip.is_link_local
-
-
-def _is_trusted_proxy(request_ip: str) -> bool:
-    if request_ip in {"localhost", "testclient"}:
-        return True
-
-    try:
-        parsed_ip = ipaddress.ip_address(request_ip)
-    except ValueError:
-        return False
-
-    for cidr in settings.trusted_proxy_cidrs:
-        try:
-            if parsed_ip in ipaddress.ip_network(cidr, strict=False):
-                return True
-        except ValueError:
-            logger.warning("CIDR de proxy confiável inválido ignorado: %s", cidr)
-
-    return False
-
-
 def _enforce_internal_observability_access(request: Request) -> None:
-    if not settings.observability_internal_only:
-        return
-
-    request_ip = _resolve_request_ip(request)
-    if not _is_internal_request(request_ip):
-        raise HTTPException(
-            status_code=403,
-            detail="Endpoint operacional restrito a rede interna",
-        )
+    """Mantém regra de acesso interno, delegando para módulo especializado."""
+    enforce_internal_observability_access(
+        request=request,
+        observability_internal_only=settings.observability_internal_only,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_cidrs=settings.trusted_proxy_cidrs,
+    )
 
 
 def _run_inactivity_watcher(stop_event: threading.Event) -> None:
@@ -233,64 +143,29 @@ async def metrics(request: Request) -> PlainTextResponse:
     _enforce_internal_observability_access(request)
     metrics_snapshot = observability_state.snapshot()
     db_health = db.healthcheck()
-    db_ready = 1 if db_health["ready"] else 0
-    db_latency_ms = db_health["latency_ms"]
-
-    lines = [
-        "# HELP chatbot_webhook_requests_total Total de webhooks recebidos.",
-        "# TYPE chatbot_webhook_requests_total counter",
-        f"chatbot_webhook_requests_total {int(metrics_snapshot['webhook_total'])}",
-        "# HELP chatbot_messages_processed_total Total de mensagens processadas com resposta.",
-        "# TYPE chatbot_messages_processed_total counter",
-        f"chatbot_messages_processed_total {int(metrics_snapshot['messages_processed_total'])}",
-        "# HELP chatbot_messages_ignored_total Total de mensagens ignoradas por payload inválido.",
-        "# TYPE chatbot_messages_ignored_total counter",
-        f"chatbot_messages_ignored_total {int(metrics_snapshot['messages_ignored_total'])}",
-        "# HELP chatbot_messages_duplicate_total Total de mensagens descartadas por idempotência.",
-        "# TYPE chatbot_messages_duplicate_total counter",
-        f"chatbot_messages_duplicate_total {int(metrics_snapshot['messages_duplicate_total'])}",
-        "# HELP chatbot_message_processing_errors_total Total de erros no processamento de mensagens.",
-        "# TYPE chatbot_message_processing_errors_total counter",
-        f"chatbot_message_processing_errors_total {int(metrics_snapshot['processing_errors_total'])}",
-        "# HELP chatbot_webhook_last_processing_seconds Duração do último processamento de webhook.",
-        "# TYPE chatbot_webhook_last_processing_seconds gauge",
-        f"chatbot_webhook_last_processing_seconds {metrics_snapshot['last_processing_seconds']:.6f}",
-        "# HELP chatbot_database_ready Estado do banco (1=up, 0=down).",
-        "# TYPE chatbot_database_ready gauge",
-        f"chatbot_database_ready {db_ready}",
-        "# HELP chatbot_database_latency_ms Latência do check de banco em milissegundos.",
-        "# TYPE chatbot_database_latency_ms gauge",
-        f"chatbot_database_latency_ms {db_latency_ms}",
-    ]
-
-    return PlainTextResponse(content="\n".join(lines) + "\n")
+    metrics_payload = build_prometheus_metrics(
+        snapshot=metrics_snapshot,
+        db_ready=db_health["ready"],
+        db_latency_ms=db_health["latency_ms"],
+    )
+    return PlainTextResponse(content=metrics_payload)
 
 
 def _validate_webhook_request(request: Request) -> str:
     mode = request.query_params.get("hub.mode")
     verify_token = request.query_params.get("hub.verify_token")
-    challenge = request.query_params.get("hub.challenge")
-
     logger.info(
         "Recebida tentativa de verificação do webhook. mode=%s token_recebido=%s",
         mode,
         verify_token,
     )
-
-    if mode == "subscribe" and verify_token == settings.meta_verify_token and challenge:
-        return challenge
-
-    raise HTTPException(status_code=403, detail="Falha na verificação do webhook")
+    return validate_webhook_challenge(request, settings.meta_verify_token)
 
 
 def _validate_meta_signature(request: Request, body: bytes) -> None:
     global _meta_signature_secret_missing_logged
 
-    if not settings.meta_validate_signature:
-        return
-
-    app_secret = (settings.meta_app_secret or "").strip()
-    if not app_secret:
+    if settings.meta_validate_signature and not (settings.meta_app_secret or "").strip():
         if not _meta_signature_secret_missing_logged:
             logger.warning(
                 "META_APP_SECRET ausente: validação HMAC do webhook está sendo ignorada "
@@ -299,33 +174,16 @@ def _validate_meta_signature(request: Request, body: bytes) -> None:
             _meta_signature_secret_missing_logged = True
         return
 
-    signature = (request.headers.get("X-Hub-Signature-256") or "").strip()
-    if not signature.startswith("sha256="):
-        raise HTTPException(status_code=403, detail="Assinatura do webhook ausente ou inválida")
-
-    expected = "sha256=" + hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected):
-        raise HTTPException(status_code=403, detail="Assinatura do webhook inválida")
+    validate_meta_signature(
+        request=request,
+        body=body,
+        validate_signature=settings.meta_validate_signature,
+        app_secret=settings.meta_app_secret,
+    )
 
 
 def _build_message_event_key(message_obj: dict, phone: str, incoming_text: str, msg_type: str) -> str:
-    message_id = (message_obj.get("id") or "").strip()
-    if message_id:
-        return f"meta_msg_id:{message_id}"
-
-    timestamp = (message_obj.get("timestamp") or "").strip()
-    fingerprint = json.dumps(
-        {
-            "from": phone,
-            "type": msg_type,
-            "text": incoming_text,
-            "timestamp": timestamp,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
-    return f"meta_msg_fallback:{digest}"
+    return build_message_event_key(message_obj, phone, incoming_text, msg_type)
 
 
 @app.get("/webhook")

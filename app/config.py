@@ -23,6 +23,7 @@ class Settings:
     db_connect_timeout: int
     inactivity_timeout_minutes: int
     inactivity_check_interval_seconds: int
+    app_debug_log_mode: bool = False
     observability_internal_only: bool = True
     trust_proxy_headers: bool = False
     trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
@@ -84,6 +85,12 @@ def load_settings() -> Settings:
         "yes",
         "on",
     }
+    app_debug_log_mode = os.getenv("APP_DEBUG_LOG_MODE", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     trusted_proxy_cidrs_raw = os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
     trusted_proxy_cidrs = tuple(
         item.strip() for item in trusted_proxy_cidrs_raw.split(",") if item.strip()
@@ -109,6 +116,7 @@ def load_settings() -> Settings:
         db_connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT", "3")),
         inactivity_timeout_minutes=int(os.getenv("INACTIVITY_TIMEOUT_MINUTES", "15")),
         inactivity_check_interval_seconds=int(os.getenv("INACTIVITY_CHECK_INTERVAL_SECONDS", "60")),
+        app_debug_log_mode=app_debug_log_mode,
         observability_internal_only=observability_internal_only,
         trust_proxy_headers=trust_proxy_headers,
         trusted_proxy_cidrs=trusted_proxy_cidrs,

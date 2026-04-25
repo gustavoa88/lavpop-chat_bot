@@ -21,7 +21,7 @@
 ## Deploy
 
 - Exigir `tests` + `integration-release` antes do deploy.
-- Definir `PRODUCTION_BASE_URL` no ambiente de produção do GitHub.
+- Definir `PRODUCTION_BASE_URL` como variable ou secret no ambiente `production` do GitHub.
 - Rodar `scripts/production_smoke_test.py --base-url <url>` após cada deploy.
 - Bloquear release se qualquer endpoint de saúde falhar.
 

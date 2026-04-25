@@ -25,7 +25,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests
-        run: pytest -q
+        run: python -m pytest -q
 
   integration-release:
     name: Integration tests (release gate)
@@ -63,12 +63,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run full unit test suite (release gate)
-        run: pytest -q
+        run: python -m pytest -q
 
       - name: Run integration tests against PostgreSQL
         env:
           TEST_POSTGRES_DSN: dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432
-        run: pytest -m integration -q
+        run: python -m pytest -m integration -q
 
   deploy-release:
     name: Deploy release (blocked by integration gate)
@@ -84,8 +84,11 @@ jobs:
       META_VALIDATE_SIGNATURE: "true"
       META_REQUIRE_APP_SECRET: "true"
       META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
-      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL || secrets.PRODUCTION_BASE_URL }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Block deploy if security baseline is not strict
         run: |
           python - <<'PY'
@@ -127,7 +130,7 @@ jobs:
       - name: Smoke test production
         run: |
           if [ -z "${PRODUCTION_BASE_URL}" ]; then
-            echo "::error::PRODUCTION_BASE_URL precisa estar configurado para o smoke test."
+            echo "::error::PRODUCTION_BASE_URL precisa estar configurado como variable ou secret no ambiente production do GitHub."
             exit 1
           fi
 

@@ -122,3 +122,14 @@ jobs:
         run: |
           echo "Gate de integração passou e baseline de segurança está estrito."
           echo "Substitua este passo pelo comando real de deploy."
+
+      - name: Smoke test production
+        env:
+          PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+        run: |
+          if [ -z "${PRODUCTION_BASE_URL}" ]; then
+            echo "::warning::PRODUCTION_BASE_URL não configurado; smoke test pós-deploy ignorado."
+            exit 0
+          fi
+
+          python scripts/production_smoke_test.py --base-url "${PRODUCTION_BASE_URL}"

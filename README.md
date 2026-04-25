@@ -146,6 +146,8 @@ No painel da Meta, configure:
 
 - Evoluir suíte de testes automatizados (pytest) com cenários de integração reais em PostgreSQL.
 - Criar painel administrativo para manter FAQ e intenções.
+- Usar o smoke test de produção em `scripts/production_smoke_test.py` após cada deploy.
+- Fechar branch protection/ruleset em `main` exigindo o check de integração.
 
 ## 9) Troubleshooting rápido (erro 401 da Meta)
 
@@ -258,6 +260,13 @@ Webhook
   -> salva mensagem em chatbot.mensagens
   -> consulta modo da conversa em chatbot.contexto_cliente
   -> bot responde OU atendimento humano assume OU só registra
+
+## 14) Operação de produção
+
+Checklist operacional e fluxo de deploy:
+
+- `docs/PRODUCTION_OPERATION_CHECKLIST.md`
+- `scripts/production_smoke_test.py`
 ```
 
 Para bancos já existentes, aplique a migração incremental:

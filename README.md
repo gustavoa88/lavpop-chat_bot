@@ -142,7 +142,7 @@ No painel da Meta, configure:
 Para diagnóstico aprofundado de webhook/envio, ative temporariamente:
 
 ```bash
-APP_DEBUG_LOG_MODE=true
+APP_DEBUG_LOG_MODE=true LOG_LEVEL=INFO uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Com esse modo ativo, o backend adiciona logs com prefixo `[debug_log_mode]` contendo:
@@ -150,6 +150,7 @@ Com esse modo ativo, o backend adiciona logs com prefixo `[debug_log_mode]` cont
 - evento parseado (tipo/chaves)
 - decisão do roteador (modo anterior/novo, ação e motivo)
 - resposta da Meta no envio de mensagens/menu (status + body resumido)
+- resultado final por evento (`processed`, `send_failed`, `duplicate`, `recorded` ou `ignored`)
 
 Se o log mostrar `Authentication Error` com `code=190` ao enviar mensagem, o webhook está chegando,
 mas o token de envio para Graph API falhou na autenticação.

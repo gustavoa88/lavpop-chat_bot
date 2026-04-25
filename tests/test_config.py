@@ -73,6 +73,14 @@ def test_load_settings_reads_app_debug_log_mode_from_env(monkeypatch):
     assert settings.app_debug_log_mode is True
 
 
+def test_load_settings_reads_log_level_from_env(monkeypatch):
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+
+    settings = load_settings()
+
+    assert settings.log_level == "DEBUG"
+
+
 def test_load_settings_uses_database_url_when_present(monkeypatch):
     monkeypatch.setenv(
         "DATABASE_URL",

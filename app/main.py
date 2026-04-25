@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 import logging
 from starlette.concurrency import run_in_threadpool
+import psycopg2
 
 from app.config import load_settings
 from app.conversation_router import BOT_ACTION, HANDOFF_ACTION, REGISTER_ONLY_ACTION, ConversationRouter
@@ -25,10 +26,12 @@ from app.webhook_security import (
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("meta_chatbot")
-
 settings = load_settings()
+logging.basicConfig(
+    level=getattr(logging, settings.log_level, logging.INFO),
+    format="%(levelname)s:%(name)s:%(message)s",
+)
+logger = logging.getLogger("meta_chatbot")
 db = Database(settings)
 chat_service = ChatService(db, settings)
 conversation_router = ConversationRouter()
@@ -113,6 +116,16 @@ def _is_db_not_initialized_error(exc: Exception) -> bool:
     return isinstance(exc, RuntimeError) and str(exc) == "Database pool not initialized"
 
 
+def _is_optional_persistence_schema_error(exc: Exception) -> bool:
+    return isinstance(
+        exc,
+        (
+            psycopg2.errors.UndefinedTable,
+            psycopg2.errors.UndefinedColumn,
+        ),
+    )
+
+
 def _best_effort_persistence(operation: str, fn):
     try:
         return fn()
@@ -120,6 +133,13 @@ def _best_effort_persistence(operation: str, fn):
         if _is_db_not_initialized_error(exc):
             logger.warning(
                 "Persistência indisponível (%s) por pool de banco não inicializado; seguindo processamento.",
+                operation,
+            )
+            return None
+        if _is_optional_persistence_schema_error(exc):
+            logger.warning(
+                "Persistência opcional indisponível (%s) por schema incompleto; "
+                "aplique db/schema.sql ou reinicie a aplicação para criar objetos mínimos.",
                 operation,
             )
             return None
@@ -560,6 +580,13 @@ async def _process_meta_webhook(request: Request) -> dict:
                 observability_state.mark_recorded()
             else:
                 observability_state.mark_error()
+            logger.info(
+                "Resultado do processamento do webhook. result=%s type=%s phone=%s payload_hash=%s",
+                result,
+                event.msg_type,
+                _phone_log_id(event.phone),
+                payload_hash[:12],
+            )
         except Exception:
             logger.exception(
                 "Falha ao processar mensagem do webhook. phone=%s type=%s",

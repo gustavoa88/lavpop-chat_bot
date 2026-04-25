@@ -1,7 +1,8 @@
 import importlib
+import asyncio
 from typing import Any
 
-from fastapi.testclient import TestClient
+import httpx
 
 
 DEFAULT_ENV = {
@@ -37,18 +38,28 @@ def _load_main_module(monkeypatch: Any):
     return main_module
 
 
+def _request(app, method: str, url: str, **kwargs) -> httpx.Response:
+    async def send() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, url, **kwargs)
+
+    return asyncio.run(send())
+
+
 def test_get_webhook_meta_returns_challenge_when_token_is_valid(monkeypatch):
     main_module = _load_main_module(monkeypatch)
 
-    with TestClient(main_module.app) as client:
-        response = client.get(
-            "/webhook/meta",
-            params={
-                "hub.mode": "subscribe",
-                "hub.verify_token": "verify-token",
-                "hub.challenge": "challenge-123",
-            },
-        )
+    response = _request(
+        main_module.app,
+        "GET",
+        "/webhook/meta",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "verify-token",
+            "hub.challenge": "challenge-123",
+        },
+    )
 
     assert response.status_code == 200
     assert response.text == "challenge-123"
@@ -57,15 +68,16 @@ def test_get_webhook_meta_returns_challenge_when_token_is_valid(monkeypatch):
 def test_get_webhook_meta_returns_403_when_token_is_invalid(monkeypatch):
     main_module = _load_main_module(monkeypatch)
 
-    with TestClient(main_module.app) as client:
-        response = client.get(
-            "/webhook/meta",
-            params={
-                "hub.mode": "subscribe",
-                "hub.verify_token": "token-invalido",
-                "hub.challenge": "challenge-123",
-            },
-        )
+    response = _request(
+        main_module.app,
+        "GET",
+        "/webhook/meta",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "token-invalido",
+            "hub.challenge": "challenge-123",
+        },
+    )
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Falha na verificação do webhook"

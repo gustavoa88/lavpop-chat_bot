@@ -214,7 +214,7 @@ def test_try_register_webhook_event_allows_processing_when_table_is_outdated():
     assert should_process is True
 
 
-def test_ensure_minimum_schema_skips_ddl_when_table_already_exists():
+def test_ensure_minimum_schema_keeps_creating_missing_objects_when_dedup_table_exists():
     db = Database(_build_settings())
     fake_conn = _ConnectionCollectingStatements(fetchone_values=[("chatbot.webhook_event_dedup",)])
 
@@ -227,9 +227,9 @@ def test_ensure_minimum_schema_skips_ddl_when_table_already_exists():
     db.ensure_minimum_schema()
 
     all_sql = "\n".join(fake_conn.cursor_obj.statements).lower()
-    assert "to_regclass('chatbot.webhook_event_dedup')" in all_sql
-    assert "create table if not exists chatbot.webhook_event_dedup" not in all_sql
-    assert fake_conn.committed is False
+    assert "create table if not exists chatbot.webhook_event_dedup" in all_sql
+    assert "create table if not exists chatbot.mensagens" in all_sql
+    assert fake_conn.committed is True
 
 
 def test_ensure_minimum_schema_logs_warning_when_user_lacks_ddl_permission(caplog):

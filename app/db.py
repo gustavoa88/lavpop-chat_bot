@@ -84,9 +84,6 @@ class Database:
         Isso evita processamento duplicado caso o deploy seja realizado antes de
         aplicar o db/schema.sql completo.
         """
-        if self._webhook_dedup_table_exists():
-            return
-
         ddl_statements = [
             "CREATE SCHEMA IF NOT EXISTS chatbot",
             """

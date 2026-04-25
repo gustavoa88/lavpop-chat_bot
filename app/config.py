@@ -23,6 +23,7 @@ class Settings:
     db_connect_timeout: int
     inactivity_timeout_minutes: int
     inactivity_check_interval_seconds: int
+    log_level: str = "INFO"
     app_debug_log_mode: bool = False
     observability_internal_only: bool = True
     trust_proxy_headers: bool = False
@@ -116,6 +117,7 @@ def load_settings() -> Settings:
         db_connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT", "3")),
         inactivity_timeout_minutes=int(os.getenv("INACTIVITY_TIMEOUT_MINUTES", "15")),
         inactivity_check_interval_seconds=int(os.getenv("INACTIVITY_CHECK_INTERVAL_SECONDS", "60")),
+        log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
         app_debug_log_mode=app_debug_log_mode,
         observability_internal_only=observability_internal_only,
         trust_proxy_headers=trust_proxy_headers,

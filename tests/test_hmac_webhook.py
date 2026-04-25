@@ -2,10 +2,11 @@ import hashlib
 import hmac
 import importlib
 import json
+import asyncio
 from typing import Any
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from app.conversation_router import REGISTER_ONLY_ACTION, RouteDecision
 
@@ -40,12 +41,26 @@ def _load_main_module(monkeypatch: Any, *, validate_signature: bool, app_secret:
     main_module = importlib.reload(main_module)
     main_module.db.start = lambda: None
     main_module.db.stop = lambda: None
+
+    async def run_inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    main_module.run_in_threadpool = run_inline
     return main_module
 
 
 def _make_signature(secret: str, body: bytes) -> str:
     digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return f"sha256={digest}"
+
+
+def _request(app, method: str, url: str, **kwargs) -> httpx.Response:
+    async def send() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, url, **kwargs)
+
+    return asyncio.run(send())
 
 
 def test_post_webhook_meta_accepts_valid_hmac_signature(monkeypatch):
@@ -55,12 +70,13 @@ def test_post_webhook_meta_accepts_valid_hmac_signature(monkeypatch):
     raw_body = json.dumps(payload).encode("utf-8")
     headers = {"X-Hub-Signature-256": _make_signature("topsecret", raw_body)}
 
-    with TestClient(main_module.app) as client:
-        response = client.post(
-            "/webhook/meta",
-            content=raw_body,
-            headers=headers,
-        )
+    response = _request(
+        main_module.app,
+        "POST",
+        "/webhook/meta",
+        content=raw_body,
+        headers=headers,
+    )
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -73,12 +89,13 @@ def test_post_webhook_meta_rejects_invalid_hmac_signature(monkeypatch):
     raw_body = json.dumps(payload).encode("utf-8")
     headers = {"X-Hub-Signature-256": "sha256=invalidsignature"}
 
-    with TestClient(main_module.app) as client:
-        response = client.post(
-            "/webhook/meta",
-            content=raw_body,
-            headers=headers,
-        )
+    response = _request(
+        main_module.app,
+        "POST",
+        "/webhook/meta",
+        content=raw_body,
+        headers=headers,
+    )
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Assinatura do webhook inválida"
@@ -142,8 +159,7 @@ def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
         ]
     }
 
-    with TestClient(main_module.app) as client:
-        response = client.post("/webhook/meta", json=payload)
+    response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -195,8 +211,7 @@ def test_post_webhook_meta_interactive_list_reply_maps_to_menu_option(monkeypatc
         ]
     }
 
-    with TestClient(main_module.app) as client:
-        response = client.post("/webhook/meta", json=payload)
+    response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -242,8 +257,7 @@ def test_post_webhook_meta_sends_interactive_menu_for_greeting(monkeypatch):
         ]
     }
 
-    with TestClient(main_module.app) as client:
-        response = client.post("/webhook/meta", json=payload)
+    response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
 
     assert response.status_code == 200
     assert menu_calls == ["5511999999999"]
@@ -256,11 +270,7 @@ def test_post_webhook_meta_compatibility_mode_without_app_secret(monkeypatch):
     payload = {"entry": []}
     raw_body = json.dumps(payload).encode("utf-8")
 
-    with TestClient(main_module.app) as client:
-        response = client.post(
-            "/webhook/meta",
-            content=raw_body,
-        )
+    response = _request(main_module.app, "POST", "/webhook/meta", content=raw_body)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -280,17 +290,19 @@ def test_startup_fails_in_strict_mode_without_app_secret(monkeypatch):
     main_module.db.start = lambda: None
     main_module.db.stop = lambda: None
 
-    with pytest.raises(RuntimeError, match="META_APP_SECRET é obrigatório"):
-        with TestClient(main_module.app):
+    async def start_app():
+        async with main_module.lifespan(main_module.app):
             pass
+
+    with pytest.raises(RuntimeError, match="META_APP_SECRET é obrigatório"):
+        asyncio.run(start_app())
 
 
 def test_health_live_returns_alive(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.is_ready = lambda: True
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/health/live")
+    response = _request(main_module.app, "GET", "/health/live")
 
     assert response.status_code == 200
     assert response.json()["status"] == "alive"
@@ -300,8 +312,7 @@ def test_health_ready_returns_ok_when_database_is_ready(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.is_ready = lambda: True
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/health/ready")
+    response = _request(main_module.app, "GET", "/health/ready")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready", "dependencies": {"database": "ok"}}
@@ -311,8 +322,7 @@ def test_health_ready_returns_503_when_database_is_unavailable(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.is_ready = lambda: False
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/health/ready")
+    response = _request(main_module.app, "GET", "/health/ready")
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Banco de dados indisponível"
@@ -322,8 +332,7 @@ def test_health_db_returns_up_when_database_is_ready(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.healthcheck = lambda: {"ready": True, "latency_ms": 1.23}
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/health/db")
+    response = _request(main_module.app, "GET", "/health/db")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -336,8 +345,7 @@ def test_health_db_returns_503_when_database_is_unavailable(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.healthcheck = lambda: {"ready": False, "latency_ms": 9.87, "error": "timeout"}
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/health/db")
+    response = _request(main_module.app, "GET", "/health/db")
 
     assert response.status_code == 503
     assert response.json()["detail"]["status"] == "down"
@@ -348,8 +356,7 @@ def test_metrics_exposes_counters_and_database_status(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.healthcheck = lambda: {"ready": True, "latency_ms": 2.5}
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/metrics")
+    response = _request(main_module.app, "GET", "/metrics")
 
     assert response.status_code == 200
     assert "chatbot_webhook_requests_total" in response.text
@@ -360,8 +367,7 @@ def test_metrics_returns_403_for_external_origin(monkeypatch):
     monkeypatch.setenv("TRUST_PROXY_HEADERS", "true")
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/metrics", headers={"X-Forwarded-For": "8.8.8.8"})
+    response = _request(main_module.app, "GET", "/metrics", headers={"X-Forwarded-For": "8.8.8.8"})
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Endpoint operacional restrito a rede interna"
@@ -372,8 +378,7 @@ def test_health_ready_returns_403_for_external_origin(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.is_ready = lambda: True
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/health/ready", headers={"X-Forwarded-For": "1.1.1.1"})
+    response = _request(main_module.app, "GET", "/health/ready", headers={"X-Forwarded-For": "1.1.1.1"})
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Endpoint operacional restrito a rede interna"
@@ -383,8 +388,7 @@ def test_metrics_ignores_x_forwarded_for_by_default(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
     main_module.db.healthcheck = lambda: {"ready": True, "latency_ms": 1.23}
 
-    with TestClient(main_module.app) as client:
-        response = client.get("/metrics", headers={"X-Forwarded-For": "8.8.8.8"})
+    response = _request(main_module.app, "GET", "/metrics", headers={"X-Forwarded-For": "8.8.8.8"})
 
     assert response.status_code == 200
 
@@ -433,8 +437,7 @@ def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypa
         ]
     }
 
-    with TestClient(main_module.app) as client:
-        response = client.post("/webhook/meta", json=payload)
+    response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -480,9 +483,8 @@ def test_post_webhook_meta_register_only_action_increments_recorded_metric(monke
         ]
     }
 
-    with TestClient(main_module.app) as client:
-        webhook_response = client.post("/webhook/meta", json=payload)
-        metrics_response = client.get("/metrics")
+    webhook_response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
+    metrics_response = _request(main_module.app, "GET", "/metrics")
 
     assert webhook_response.status_code == 200
     assert webhook_response.json() == {"status": "ok"}

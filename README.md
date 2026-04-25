@@ -206,14 +206,23 @@ Há uma suíte de integração (`tests/test_db_integration_postgres.py`) que val
 - operações `execute`, `fetchone` e `fetchall`
 - idempotência real de `try_register_webhook_event` com `ON CONFLICT`
 
-Defina uma conexão de teste e rode somente os cenários de integração:
+O teste tenta resolver DSN nesta ordem:
+
+1. `TEST_POSTGRES_DSN`
+2. `DATABASE_URL`
+3. fallback local: `dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432`
+
+Se nenhuma conexão estiver acessível, os testes de integração são marcados como `skipped` com mensagem de orientação.
+
+Para garantir execução local (sem fallback), defina uma conexão de teste e rode somente os cenários de integração:
 
 ```bash
 export TEST_POSTGRES_DSN='dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432'
 pytest -m integration -q
 ```
 
-> Os testes de integração são automaticamente ignorados localmente quando `TEST_POSTGRES_DSN` não está definido.
+> Se o Postgres local padrão estiver ativo, a suíte de integração roda sem configuração adicional.
+> Para evitar ambiguidade entre ambientes, prefira definir `TEST_POSTGRES_DSN` explicitamente.
 > No CI de release (branch `main`/tags `v*`), a suíte de integração com PostgreSQL é obrigatória como gate.
 >
 > O job `Deploy release (blocked by integration gate)` só executa depois dos jobs `tests` + `Integration tests (release gate)` com sucesso e ainda valida baseline estrito de segurança via secrets (`APP_ENV`, `META_VALIDATE_SIGNATURE`, `META_REQUIRE_APP_SECRET`, `META_APP_SECRET`).

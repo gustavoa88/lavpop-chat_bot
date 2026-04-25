@@ -10,7 +10,18 @@ from app.db import Database
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_SQL = ROOT / "db" / "schema.sql"
-TEST_DSN = os.getenv("TEST_POSTGRES_DSN")
+
+
+def _resolve_test_dsn() -> str | None:
+    explicit_dsn = (os.getenv("TEST_POSTGRES_DSN") or "").strip()
+    if explicit_dsn:
+        return explicit_dsn
+
+    database_url = (os.getenv("DATABASE_URL") or "").strip()
+    if database_url:
+        return database_url
+
+    return "dbname=lavpop_chatbot user=postgres password=postgres host=127.0.0.1 port=5432"
 
 pytestmark = pytest.mark.integration
 
@@ -49,11 +60,22 @@ def _prepare_schema(dsn: str) -> None:
 
 @pytest.fixture(scope="module")
 def integration_db() -> Database:
-    if not TEST_DSN:
-        pytest.skip("Defina TEST_POSTGRES_DSN para executar testes de integração com PostgreSQL.")
+    test_dsn = _resolve_test_dsn()
+    if not test_dsn:
+        pytest.skip("Não foi possível resolver DSN para testes de integração PostgreSQL.")
 
-    _prepare_schema(TEST_DSN)
-    db = Database(_settings_from_dsn(TEST_DSN))
+    try:
+        with psycopg2.connect(test_dsn):
+            pass
+    except Exception as exc:
+        pytest.skip(
+            "PostgreSQL local indisponível para integração. "
+            "Defina TEST_POSTGRES_DSN (ou DATABASE_URL) apontando para um banco acessível. "
+            f"Erro original: {exc}"
+        )
+
+    _prepare_schema(test_dsn)
+    db = Database(_settings_from_dsn(test_dsn))
     db.start()
     yield db
     db.stop()

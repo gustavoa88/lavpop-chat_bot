@@ -8,6 +8,8 @@ import threading
 class ObservabilityState:
     """Armazena contadores operacionais em memória de forma thread-safe."""
 
+    duration_buckets: tuple[float, ...] = (0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0)
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.webhook_total = 0
@@ -16,7 +18,13 @@ class ObservabilityState:
         self.messages_ignored_total = 0
         self.messages_duplicate_total = 0
         self.processing_errors_total = 0
+        self.signature_failures_total = 0
         self.last_processing_seconds = 0.0
+        self.webhook_processing_duration_count = 0
+        self.webhook_processing_duration_sum = 0.0
+        self.webhook_processing_duration_buckets = {
+            bucket: 0 for bucket in self.duration_buckets
+        }
 
     def mark_webhook(self) -> None:
         with self._lock:
@@ -42,11 +50,20 @@ class ObservabilityState:
         with self._lock:
             self.processing_errors_total += 1
 
+    def mark_signature_failure(self) -> None:
+        with self._lock:
+            self.signature_failures_total += 1
+
     def set_last_processing_seconds(self, seconds: float) -> None:
         with self._lock:
             self.last_processing_seconds = seconds
+            self.webhook_processing_duration_count += 1
+            self.webhook_processing_duration_sum += seconds
+            for bucket in self.duration_buckets:
+                if seconds <= bucket:
+                    self.webhook_processing_duration_buckets[bucket] += 1
 
-    def snapshot(self) -> dict[str, float]:
+    def snapshot(self) -> dict[str, float | dict[float, int]]:
         with self._lock:
             return {
                 "webhook_total": float(self.webhook_total),
@@ -55,13 +72,22 @@ class ObservabilityState:
                 "messages_ignored_total": float(self.messages_ignored_total),
                 "messages_duplicate_total": float(self.messages_duplicate_total),
                 "processing_errors_total": float(self.processing_errors_total),
+                "signature_failures_total": float(self.signature_failures_total),
                 "last_processing_seconds": self.last_processing_seconds,
+                "webhook_processing_duration_count": float(self.webhook_processing_duration_count),
+                "webhook_processing_duration_sum": float(self.webhook_processing_duration_sum),
+                "webhook_processing_duration_buckets": dict(self.webhook_processing_duration_buckets),
             }
 
 
-def build_prometheus_metrics(snapshot: dict[str, float], db_ready: bool, db_latency_ms: float) -> str:
+def build_prometheus_metrics(
+    snapshot: dict[str, float | dict[float, int]],
+    db_ready: bool,
+    db_latency_ms: float,
+) -> str:
     """Renderiza o payload de métricas no formato texto do Prometheus."""
     db_ready_value = 1 if db_ready else 0
+    duration_buckets = snapshot.get("webhook_processing_duration_buckets", {})
     lines = [
         "# HELP chatbot_webhook_requests_total Total de webhooks recebidos.",
         "# TYPE chatbot_webhook_requests_total counter",
@@ -81,9 +107,34 @@ def build_prometheus_metrics(snapshot: dict[str, float], db_ready: bool, db_late
         "# HELP chatbot_message_processing_errors_total Total de erros no processamento de mensagens.",
         "# TYPE chatbot_message_processing_errors_total counter",
         f"chatbot_message_processing_errors_total {int(snapshot['processing_errors_total'])}",
+        "# HELP chatbot_webhook_signature_failures_total Total de falhas de validação da assinatura do webhook.",
+        "# TYPE chatbot_webhook_signature_failures_total counter",
+        f"chatbot_webhook_signature_failures_total {int(snapshot.get('signature_failures_total', 0))}",
         "# HELP chatbot_webhook_last_processing_seconds Duração do último processamento de webhook.",
         "# TYPE chatbot_webhook_last_processing_seconds gauge",
         f"chatbot_webhook_last_processing_seconds {snapshot['last_processing_seconds']:.6f}",
+        "# HELP chatbot_webhook_processing_duration_seconds Duração do processamento do webhook.",
+        "# TYPE chatbot_webhook_processing_duration_seconds histogram",
+    ]
+
+    cumulative = 0
+    for bucket in ObservabilityState.duration_buckets:
+        cumulative = int(duration_buckets.get(bucket, cumulative))
+        lines.append(
+            f'chatbot_webhook_processing_duration_seconds_bucket{{le="{bucket}"}} {cumulative}'
+        )
+    total_count = int(snapshot.get("webhook_processing_duration_count", 0))
+    lines.append(
+        'chatbot_webhook_processing_duration_seconds_bucket{le="+Inf"} '
+        f"{total_count}"
+    )
+    lines.append(
+        f"chatbot_webhook_processing_duration_seconds_sum {snapshot.get('webhook_processing_duration_sum', 0.0):.6f}"
+    )
+    lines.append(
+        f"chatbot_webhook_processing_duration_seconds_count {total_count}"
+    )
+    lines += [
         "# HELP chatbot_database_ready Estado do banco (1=up, 0=down).",
         "# TYPE chatbot_database_ready gauge",
         f"chatbot_database_ready {db_ready_value}",

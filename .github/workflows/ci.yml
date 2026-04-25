@@ -84,6 +84,7 @@ jobs:
       META_VALIDATE_SIGNATURE: "true"
       META_REQUIRE_APP_SECRET: "true"
       META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
     steps:
       - name: Block deploy if security baseline is not strict
         run: |
@@ -124,12 +125,10 @@ jobs:
           echo "Substitua este passo pelo comando real de deploy."
 
       - name: Smoke test production
-        env:
-          PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
         run: |
           if [ -z "${PRODUCTION_BASE_URL}" ]; then
-            echo "::warning::PRODUCTION_BASE_URL não configurado; smoke test pós-deploy ignorado."
-            exit 0
+            echo "::error::PRODUCTION_BASE_URL precisa estar configurado para o smoke test."
+            exit 1
           fi
 
           python scripts/production_smoke_test.py --base-url "${PRODUCTION_BASE_URL}"

@@ -25,6 +25,16 @@ groups:
   - name: lavpop-chatbot-processing
     interval: 30s
     rules:
+      - alert: LavpopChatbotSignatureFailuresHigh
+        expr: sum(rate(chatbot_webhook_signature_failures_total{job="lavpop-chatbot"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: lavpop-chatbot
+        annotations:
+          summary: "Falhas de assinatura do webhook detectadas"
+          description: "A aplicação está rejeitando webhooks por assinatura inválida ou ausente de forma sustentada."
+
       - alert: LavpopChatbotProcessingErrorRateHigh
         expr: |
           (
@@ -41,11 +51,15 @@ groups:
           description: "A taxa de erro de processamento está acima de 5% por mais de 10 minutos."
 
       - alert: LavpopChatbotWebhookLatencyP95High
-        expr: avg_over_time(chatbot_webhook_last_processing_seconds{job="lavpop-chatbot"}[10m]) > 2
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(chatbot_webhook_processing_duration_seconds_bucket{job="lavpop-chatbot"}[5m])) by (le)
+          ) > 2
         for: 15m
         labels:
           severity: warning
           service: lavpop-chatbot
         annotations:
-          summary: "Latência média do webhook elevada"
-          description: "A duração média do processamento do webhook está acima de 2s por mais de 15 minutos."
+          summary: "P95 do webhook elevado"
+          description: "O p95 da duração de processamento do webhook está acima de 2s por mais de 15 minutos."

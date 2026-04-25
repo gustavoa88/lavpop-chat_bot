@@ -146,8 +146,11 @@ No painel da Meta, configure:
 
 - Evoluir suíte de testes automatizados (pytest) com cenários de integração reais em PostgreSQL.
 - Criar painel administrativo para manter FAQ e intenções.
+- Publicar o chatbot atrás de Nginx usando os templates em `deploy/nginx/`.
+- Rodar backup e restore de banco com `scripts/postgres_backup.py`, `scripts/postgres_restore.py` e `scripts/postgres_restore_drill.py`.
 - Usar o smoke test de produção em `scripts/production_smoke_test.py` após cada deploy.
 - Fechar branch protection/ruleset em `main` exigindo o check de integração.
+- Consultar `docs/PRODUCTION_EDGE_HARDENING.md` e `docs/PRODUCTION_OPERATION_CHECKLIST.md` antes do go-live.
 
 ## 9) Troubleshooting rápido (erro 401 da Meta)
 

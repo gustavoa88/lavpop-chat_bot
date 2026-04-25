@@ -104,6 +104,9 @@ def test_post_webhook_meta_rejects_invalid_hmac_signature(monkeypatch):
     assert response.status_code == 403
     assert response.json()["detail"] == "Assinatura do webhook inválida"
 
+    metrics_response = _request(main_module.app, "GET", "/metrics")
+    assert "chatbot_webhook_signature_failures_total 1" in metrics_response.text
+
 
 def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
     main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
@@ -402,6 +405,7 @@ def test_metrics_exposes_counters_and_database_status(monkeypatch):
 
     assert response.status_code == 200
     assert "chatbot_webhook_requests_total" in response.text
+    assert "chatbot_webhook_processing_duration_seconds_count" in response.text
     assert "chatbot_database_ready 1" in response.text
 
 

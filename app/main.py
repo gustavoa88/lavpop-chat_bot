@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections import defaultdict, deque
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from app.config import load_settings
 from app.conversation_router import BOT_ACTION, HANDOFF_ACTION, REGISTER_ONLY_ACTION, ConversationRouter
 from app.db import Database
 from app.network_security import enforce_internal_observability_access
+from app.network_security import resolve_request_ip
 from app.observability import ObservabilityState, build_prometheus_metrics
 from app.services import ChatService, PROACTIVE_MENU_MESSAGE
 from app.webhook_parser import ParsedMessageEvent
@@ -36,6 +38,10 @@ db = Database(settings)
 chat_service = ChatService(db, settings)
 conversation_router = ConversationRouter()
 _meta_signature_secret_missing_logged = False
+
+
+def _is_production() -> bool:
+    return settings.app_env in {"prod", "production"}
 
 
 class _ObservabilityState:
@@ -93,6 +99,29 @@ class _ObservabilityState:
 observability_state = _ObservabilityState()
 
 
+class _WebhookRateLimiter:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hits_by_key: dict[str, deque[float]] = defaultdict(deque)
+
+    def allow(self, key: str, *, now: float, limit_per_minute: int) -> bool:
+        if limit_per_minute <= 0:
+            return True
+
+        window_started_at = now - 60
+        with self._lock:
+            hits = self._hits_by_key[key]
+            while hits and hits[0] <= window_started_at:
+                hits.popleft()
+            if len(hits) >= limit_per_minute:
+                return False
+            hits.append(now)
+            return True
+
+
+webhook_rate_limiter = _WebhookRateLimiter()
+
+
 def _phone_log_id(phone: str) -> str:
     phone = (phone or "").strip()
     if not phone:
@@ -108,7 +137,7 @@ def _message_preview(message: str, limit: int = 80) -> str:
 
 
 def _debug_log(message: str, *args) -> None:
-    if settings.app_debug_log_mode:
+    if settings.app_debug_log_mode and not _is_production():
         logger.info("[debug_log_mode] " + message, *args)
 
 
@@ -147,10 +176,15 @@ def _best_effort_persistence(operation: str, fn):
 
 
 def _enforce_production_security_baseline() -> None:
-    if settings.app_env in {"prod", "production"} and not settings.meta_require_app_secret:
+    if _is_production() and not settings.meta_require_app_secret:
         raise RuntimeError(
             "Em produção (APP_ENV=prod|production), META_REQUIRE_APP_SECRET deve ser true "
             "para impedir modo compatibilidade sem validação HMAC estrita."
+        )
+    if _is_production() and settings.app_debug_log_mode:
+        raise RuntimeError(
+            "Em produção (APP_ENV=prod|production), APP_DEBUG_LOG_MODE deve ser false "
+            "para evitar logs com payload bruto do webhook."
         )
 
 
@@ -162,6 +196,22 @@ def _enforce_internal_observability_access(request: Request) -> None:
         trust_proxy_headers=settings.trust_proxy_headers,
         trusted_proxy_cidrs=settings.trusted_proxy_cidrs,
     )
+
+
+def _enforce_webhook_rate_limit(request: Request) -> None:
+    request_ip = resolve_request_ip(
+        request=request,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_cidrs=settings.trusted_proxy_cidrs,
+    )
+    allowed = webhook_rate_limiter.allow(
+        request_ip or "unknown",
+        now=time.time(),
+        limit_per_minute=settings.webhook_rate_limit_per_minute,
+    )
+    if not allowed:
+        logger.warning("Webhook bloqueado por rate limit. ip=%s", request_ip or "unknown")
+        raise HTTPException(status_code=429, detail="Rate limit excedido")
 
 
 def _run_inactivity_watcher(stop_event: threading.Event) -> None:
@@ -546,6 +596,7 @@ async def verify_webhook_meta(request: Request):
 
 
 async def _process_meta_webhook(request: Request) -> dict:
+    _enforce_webhook_rate_limit(request)
     observability_state.mark_webhook()
     started_at = time.perf_counter()
     raw_body = await request.body()

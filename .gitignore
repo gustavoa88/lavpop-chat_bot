@@ -12,6 +12,7 @@ venv/
 
 # Codex
 .codex/
+.codex*
 
 # VSCode
 .vscode/

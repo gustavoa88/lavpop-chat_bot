@@ -32,7 +32,9 @@ class Database:
             connect_timeout=self._settings.db_connect_timeout,
             application_name="meta_chatbot",
         )
-        self.ensure_minimum_schema()
+        if self._settings.app_env not in {"prod", "production"}:
+            self.ensure_minimum_schema()
+        self.assert_required_schema()
 
     def stop(self) -> None:
         if self._pool is None:
@@ -159,6 +161,65 @@ class Database:
                 "Falha ao garantir schema mínimo de deduplicação do webhook. "
                 "A aplicação seguirá em modo de compatibilidade."
             )
+
+    def validate_required_schema(self) -> list[str]:
+        required_columns = {
+            "chatbot.webhook_event_dedup": {"event_key", "payload_hash", "source", "processed_at"},
+            "chatbot.mensagens": {
+                "event_key",
+                "telefone",
+                "direcao",
+                "origem",
+                "tipo",
+                "conteudo_texto",
+                "status",
+            },
+            "chatbot.contexto_cliente": {"telefone", "modo_conversa", "ultima_interacao", "status"},
+            "chatbot.log_conversas": {"telefone", "mensagem_cliente", "resposta_bot", "origem_resposta"},
+        }
+        problems: list[str] = []
+
+        try:
+            with self.connection() as conn:
+                with conn.cursor() as cur:
+                    for relation, columns in required_columns.items():
+                        schema_name, table_name = relation.split(".", 1)
+                        cur.execute("SELECT to_regclass(%s)", (relation,))
+                        row = cur.fetchone()
+                        if not row or not row[0]:
+                            problems.append(f"tabela ausente: {relation}")
+                            continue
+
+                        cur.execute(
+                            """
+                            SELECT column_name
+                              FROM information_schema.columns
+                             WHERE table_schema = %s
+                               AND table_name = %s
+                            """,
+                            (schema_name, table_name),
+                        )
+                        existing_columns = {item[0] for item in cur.fetchall()}
+                        missing_columns = sorted(columns - existing_columns)
+                        if missing_columns:
+                            problems.append(
+                                f"colunas ausentes em {relation}: {', '.join(missing_columns)}"
+                            )
+        except Exception as exc:
+            problems.append(f"falha ao validar schema obrigatório: {exc}")
+
+        return problems
+
+    def assert_required_schema(self) -> None:
+        problems = self.validate_required_schema()
+        if not problems:
+            return
+
+        message = "Schema obrigatório do banco incompatível: " + "; ".join(problems)
+        if self._settings.app_env in {"prod", "production"}:
+            raise RuntimeError(message)
+
+        logger.warning("%s", message)
 
     def _webhook_dedup_table_exists(self) -> bool:
         try:

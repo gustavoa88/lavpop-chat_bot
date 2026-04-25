@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 
 import psycopg2
+import pytest
 
 from app.config import Settings
 from app.db import Database
@@ -125,6 +126,11 @@ class _ConnectionWithPrivilegeError:
         return None
 
 
+class _ConnectionPoolStub:
+    def closeall(self):
+        return None
+
+
 def _build_settings() -> Settings:
     return Settings(
         openai_api_key="",
@@ -244,3 +250,37 @@ def test_ensure_minimum_schema_logs_warning_when_user_lacks_ddl_permission(caplo
     db.ensure_minimum_schema()
 
     assert "sem permissão para criar schema/tabela mínima de deduplicação" in caplog.text
+
+
+def test_assert_required_schema_raises_in_production_when_schema_is_invalid(monkeypatch):
+    settings = _build_settings()
+    settings = Settings(**{**settings.__dict__, "app_env": "prod"})
+    db = Database(settings)
+    monkeypatch.setattr(db, "validate_required_schema", lambda: ["tabela ausente: chatbot.mensagens"])
+
+    with pytest.raises(RuntimeError, match="Schema obrigatório do banco incompatível"):
+        db.assert_required_schema()
+
+
+def test_assert_required_schema_warns_outside_production_when_schema_is_invalid(monkeypatch, caplog):
+    db = Database(_build_settings())
+    monkeypatch.setattr(db, "validate_required_schema", lambda: ["tabela ausente: chatbot.mensagens"])
+
+    db.assert_required_schema()
+
+    assert "Schema obrigatório do banco incompatível" in caplog.text
+
+
+def test_start_in_production_skips_auto_ddl_and_only_validates_schema(monkeypatch):
+    settings = _build_settings()
+    settings = Settings(**{**settings.__dict__, "app_env": "prod"})
+    db = Database(settings)
+    calls = []
+
+    monkeypatch.setattr("app.db.ThreadedConnectionPool", lambda **_kwargs: _ConnectionPoolStub())
+    monkeypatch.setattr(db, "ensure_minimum_schema", lambda: calls.append("ddl"))
+    monkeypatch.setattr(db, "assert_required_schema", lambda: calls.append("validate"))
+
+    db.start()
+
+    assert calls == ["validate"]

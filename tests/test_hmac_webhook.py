@@ -3,6 +3,7 @@ import hmac
 import importlib
 import json
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -26,6 +27,9 @@ DEFAULT_ENV = {
     "DB_MIN_CONN": "1",
     "DB_MAX_CONN": "5",
     "DB_CONNECT_TIMEOUT": "3",
+    "APP_ENV": "dev",
+    "APP_DEBUG_LOG_MODE": "false",
+    "WEBHOOK_RATE_LIMIT_PER_MINUTE": "120",
 }
 
 
@@ -296,6 +300,44 @@ def test_startup_fails_in_strict_mode_without_app_secret(monkeypatch):
 
     with pytest.raises(RuntimeError, match="META_APP_SECRET é obrigatório"):
         asyncio.run(start_app())
+
+
+def test_startup_fails_in_production_with_debug_log_mode(monkeypatch):
+    for key, value in DEFAULT_ENV.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("APP_DEBUG_LOG_MODE", "true")
+    monkeypatch.setenv("META_VALIDATE_SIGNATURE", "true")
+    monkeypatch.setenv("META_REQUIRE_APP_SECRET", "true")
+    monkeypatch.setenv("META_APP_SECRET", "topsecret")
+
+    import app.main as main_module
+
+    main_module = importlib.reload(main_module)
+    main_module.db.start = lambda: None
+    main_module.db.stop = lambda: None
+
+    async def start_app():
+        async with main_module.lifespan(main_module.app):
+            pass
+
+    with pytest.raises(RuntimeError, match="APP_DEBUG_LOG_MODE deve ser false"):
+        asyncio.run(start_app())
+
+
+def test_post_webhook_meta_rate_limits_when_limit_is_exceeded(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+    patched_settings = replace(main_module.settings, webhook_rate_limit_per_minute=1)
+    monkeypatch.setattr(main_module, "settings", patched_settings)
+
+    payload = {"entry": []}
+    first = _request(main_module.app, "POST", "/webhook/meta", json=payload)
+    second = _request(main_module.app, "POST", "/webhook/meta", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["detail"] == "Rate limit excedido"
 
 
 def test_health_live_returns_alive(monkeypatch):

@@ -43,20 +43,21 @@ Preencha:
 - `META_PHONE_NUMBER_ID`
 - `META_APP_SECRET` (App Secret da Meta para validar assinatura HMAC do webhook)
 - `META_VALIDATE_SIGNATURE` (`true`/`false`, padrão: `true`)
-- `META_REQUIRE_APP_SECRET` (`true`/`false`, padrão: `false`)
+- `META_REQUIRE_APP_SECRET` (`true`/`false`, use `true` em produção)
 - dados do PostgreSQL (`DB_*`) **ou** `DATABASE_URL` (quando definido, tem precedência)
 - `INACTIVITY_TIMEOUT_MINUTES` (padrão: `15`)
 - `INACTIVITY_CHECK_INTERVAL_SECONDS` (padrão: `60`)
 - `OBSERVABILITY_INTERNAL_ONLY` (`true`/`false`, padrão: `true`) para restringir `/metrics` e `/health/*` a rede interna
 - `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
 - `APP_DEBUG_LOG_MODE` (`true`/`false`, padrão: `false`) para habilitar logs detalhados de diagnóstico (payload recebido, decisão do roteador e resposta da Meta)
+- `WEBHOOK_RATE_LIMIT_PER_MINUTE` (padrão: `120`) para limitar chamadas por IP no webhook; use a borda/proxy como proteção principal.
 
-> Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio, a API entra em
+> Se `META_VALIDATE_SIGNATURE=true` e `META_APP_SECRET` estiver vazio fora de produção, a API entra em
 > modo de compatibilidade e **não bloqueia** o webhook (apenas loga aviso de segurança).
 >
-> Para produção, use `APP_ENV=prod` (ou `production`) e `META_REQUIRE_APP_SECRET=true`:
-> nesse modo, a aplicação falha na inicialização se a configuração de assinatura não estiver
-> estrita (fail-fast de segurança).
+> Para produção, use `APP_ENV=prod` (ou `production`), `META_REQUIRE_APP_SECRET=true` e
+> `APP_DEBUG_LOG_MODE=false`: nesse modo, a aplicação falha na inicialização se a configuração
+> de assinatura ou logs não estiver estrita (fail-fast de segurança).
 
 ## 4) Criar tabelas no PostgreSQL
 
@@ -64,13 +65,12 @@ Preencha:
 psql -h 127.0.0.1 -U postgres -d lavpop_chatbot -f db/schema.sql
 ```
 
-> A aplicação tenta criar automaticamente o schema `chatbot` e a tabela
-> `chatbot.webhook_event_dedup` na inicialização para preservar idempotência
-> básica. Ainda assim, aplique o `db/schema.sql` para garantir todas as tabelas
-> de negócio (`faq_regras`, `contexto_cliente`, `log_conversas`, etc.).
+> A aplicação tenta criar automaticamente objetos mínimos em ambientes permissivos, mas
+> produção deve usar migrações versionadas em `db/migrations/` e usuário runtime sem DDL.
+> Se o schema obrigatório estiver incompatível em `APP_ENV=prod`, a aplicação falha no startup.
 >
-> Se o usuário do banco não tiver permissão DDL, a API apenas registra **warning**
-> e segue em modo de compatibilidade (sem quebrar o startup).
+> Se o usuário do banco não tiver permissão DDL fora de produção, a API registra **warning**
+> e segue em modo de compatibilidade. Em produção, aplique as migrações antes do restart.
 
 ## 5) Rodar API
 
@@ -79,6 +79,16 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Serviço systemd de produção:
+
+```bash
+sudo cp deploy/lavpop-chatbot.service /etc/systemd/system/lavpop-chatbot.service
+sudo systemctl daemon-reload
+sudo systemctl enable lavpop-chatbot
+sudo systemctl restart lavpop-chatbot
+sudo systemctl status lavpop-chatbot --no-pager
 ```
 
 Health check:
@@ -139,7 +149,7 @@ No painel da Meta, configure:
 
 ## 9) Troubleshooting rápido (erro 401 da Meta)
 
-Para diagnóstico aprofundado de webhook/envio, ative temporariamente:
+Para diagnóstico aprofundado de webhook/envio em ambiente de desenvolvimento, ative temporariamente:
 
 ```bash
 APP_DEBUG_LOG_MODE=true LOG_LEVEL=INFO uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -151,6 +161,8 @@ Com esse modo ativo, o backend adiciona logs com prefixo `[debug_log_mode]` cont
 - decisão do roteador (modo anterior/novo, ação e motivo)
 - resposta da Meta no envio de mensagens/menu (status + body resumido)
 - resultado final por evento (`processed`, `send_failed`, `duplicate`, `recorded` ou `ignored`)
+
+> Em `APP_ENV=prod`, `APP_DEBUG_LOG_MODE=true` é bloqueado no startup para evitar payload bruto em logs.
 
 Se o log mostrar `Authentication Error` com `code=190` ao enviar mensagem, o webhook está chegando,
 mas o token de envio para Graph API falhou na autenticação.
@@ -217,7 +229,27 @@ SELECT nome_regra, palavras_chave, resposta
  WHERE nome_regra = 'o_que_lavar';
 ```
 
-## 12) Roteador de conversas (bot + humano)
+## 12) Publicar alterações no Git
+
+Para validar, commitar e enviar as alterações para `origin`:
+
+```bash
+scripts/git_push.sh "feat: sua mensagem de commit"
+```
+
+Se quiser pular os testes locais:
+
+```bash
+SKIP_TESTS=1 scripts/git_push.sh "feat: sua mensagem de commit"
+```
+
+O script:
+- roda `pytest -q` por padrão;
+- faz `git add -A`;
+- cria o commit com a mensagem informada;
+- envia para a branch atual com `git push -u origin <branch>`.
+
+## 13) Roteador de conversas (bot + humano)
 
 O webhook agora funciona como roteador:
 

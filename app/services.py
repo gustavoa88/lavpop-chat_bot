@@ -273,7 +273,7 @@ class ChatService:
         self._meta_send_blocked_until = 0.0
 
     def _debug_log(self, message: str, *args) -> None:
-        if self.settings.app_debug_log_mode:
+        if self.settings.app_debug_log_mode and self.settings.app_env not in {"prod", "production"}:
             logger.info("[debug_log_mode] " + message, *args)
 
     def _active_rules(self) -> list[dict]:

@@ -25,6 +25,7 @@ class Settings:
     inactivity_check_interval_seconds: int
     log_level: str = "INFO"
     app_debug_log_mode: bool = False
+    webhook_rate_limit_per_minute: int = 120
     observability_internal_only: bool = True
     trust_proxy_headers: bool = False
     trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
@@ -119,6 +120,7 @@ def load_settings() -> Settings:
         inactivity_check_interval_seconds=int(os.getenv("INACTIVITY_CHECK_INTERVAL_SECONDS", "60")),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
         app_debug_log_mode=app_debug_log_mode,
+        webhook_rate_limit_per_minute=int(os.getenv("WEBHOOK_RATE_LIMIT_PER_MINUTE", "120")),
         observability_internal_only=observability_internal_only,
         trust_proxy_headers=trust_proxy_headers,
         trusted_proxy_cidrs=trusted_proxy_cidrs,

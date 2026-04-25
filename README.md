@@ -148,6 +148,7 @@ No painel da Meta, configure:
 - Criar painel administrativo para manter FAQ e intenções.
 - Publicar o chatbot atrás de Nginx usando os templates em `deploy/nginx/`.
 - Rodar backup e restore de banco com `scripts/postgres_backup.py`, `scripts/postgres_restore.py` e `scripts/postgres_restore_drill.py`.
+- Diagnosticar DNS, Nginx, firewall e serviço com `scripts/edge_diagnose.py`.
 - Usar o smoke test de produção em `scripts/production_smoke_test.py` após cada deploy.
 - Fechar branch protection/ruleset em `main` exigindo o check de integração.
 - Consultar `docs/PRODUCTION_EDGE_HARDENING.md` e `docs/PRODUCTION_OPERATION_CHECKLIST.md` antes do go-live.

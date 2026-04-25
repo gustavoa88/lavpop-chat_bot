@@ -21,3 +21,4 @@
 
 - Executar `nginx -t` antes de recarregar o serviço.
 - Validar que o webhook responde e que `/metrics` e `/health/*` não ficam acessíveis publicamente.
+- Rodar `scripts/edge_diagnose.py --domain <dominio> --ssh-target <user@host>` para separar DNS, borda, firewall e serviço.

@@ -134,4 +134,4 @@ jobs:
             exit 1
           fi
 
-          python scripts/production_smoke_test.py --base-url "${PRODUCTION_BASE_URL}"
+          python -m scripts.production_smoke_test --base-url "${PRODUCTION_BASE_URL}"

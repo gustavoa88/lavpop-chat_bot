@@ -81,9 +81,11 @@ jobs:
       - name: Block deploy if security baseline is not strict
         env:
           APP_ENV: ${{ secrets.APP_ENV }}
+          APP_DEBUG_LOG_MODE: ${{ secrets.APP_DEBUG_LOG_MODE }}
           META_VALIDATE_SIGNATURE: ${{ secrets.META_VALIDATE_SIGNATURE }}
           META_REQUIRE_APP_SECRET: ${{ secrets.META_REQUIRE_APP_SECRET }}
           META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          WEBHOOK_RATE_LIMIT_PER_MINUTE: ${{ secrets.WEBHOOK_RATE_LIMIT_PER_MINUTE }}
         run: |
           python - <<'PY'
           import os
@@ -91,6 +93,7 @@ jobs:
 
           errors = []
           app_env = (os.getenv("APP_ENV") or "").strip().lower()
+          debug_log_mode = (os.getenv("APP_DEBUG_LOG_MODE") or "").strip().lower()
           validate = (os.getenv("META_VALIDATE_SIGNATURE") or "").strip().lower()
           require_secret = (os.getenv("META_REQUIRE_APP_SECRET") or "").strip().lower()
           app_secret = (os.getenv("META_APP_SECRET") or "").strip()
@@ -101,6 +104,8 @@ jobs:
             errors.append("META_VALIDATE_SIGNATURE deve ser 'true'.")
           if require_secret != "true":
             errors.append("META_REQUIRE_APP_SECRET deve ser 'true'.")
+          if debug_log_mode != "false":
+            errors.append("APP_DEBUG_LOG_MODE deve ser 'false'.")
           if not app_secret:
             errors.append("META_APP_SECRET precisa estar definido.")
 

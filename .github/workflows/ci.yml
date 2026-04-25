@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -50,10 +50,10 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -77,15 +77,15 @@ jobs:
       - tests
       - integration-release
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment: production
+    env:
+      APP_ENV: production
+      APP_DEBUG_LOG_MODE: "false"
+      META_VALIDATE_SIGNATURE: "true"
+      META_REQUIRE_APP_SECRET: "true"
+      META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
     steps:
       - name: Block deploy if security baseline is not strict
-        env:
-          APP_ENV: ${{ secrets.APP_ENV }}
-          APP_DEBUG_LOG_MODE: ${{ secrets.APP_DEBUG_LOG_MODE }}
-          META_VALIDATE_SIGNATURE: ${{ secrets.META_VALIDATE_SIGNATURE }}
-          META_REQUIRE_APP_SECRET: ${{ secrets.META_REQUIRE_APP_SECRET }}
-          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
-          WEBHOOK_RATE_LIMIT_PER_MINUTE: ${{ secrets.WEBHOOK_RATE_LIMIT_PER_MINUTE }}
         run: |
           python - <<'PY'
           import os

@@ -29,6 +29,8 @@ class Settings:
     observability_internal_only: bool = True
     trust_proxy_headers: bool = False
     trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
+    operator_panel_enabled: bool = False
+    operator_panel_token: str = ""
     app_env: str = "dev"
 
 
@@ -93,6 +95,12 @@ def load_settings() -> Settings:
         "yes",
         "on",
     }
+    operator_panel_enabled = os.getenv("OPERATOR_PANEL_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     trusted_proxy_cidrs_raw = os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
     trusted_proxy_cidrs = tuple(
         item.strip() for item in trusted_proxy_cidrs_raw.split(",") if item.strip()
@@ -124,5 +132,7 @@ def load_settings() -> Settings:
         observability_internal_only=observability_internal_only,
         trust_proxy_headers=trust_proxy_headers,
         trusted_proxy_cidrs=trusted_proxy_cidrs,
+        operator_panel_enabled=operator_panel_enabled,
+        operator_panel_token=os.getenv("OPERATOR_PANEL_TOKEN", "").strip(),
         app_env=os.getenv("APP_ENV", os.getenv("ENV", "dev")).strip().lower(),
     )

@@ -7,7 +7,7 @@ Projeto Python do zero para atendimento via **WhatsApp Cloud API (Meta)** com:
 
 ## 1) Pré-requisitos
 
-- Python 3.11+
+- Python 3.12 recomendado em CI/produção controlada (`>=3.11,<3.14` suportado)
 - PostgreSQL 14+
 - Conta Meta for Developers com WhatsApp Cloud API configurada
 - Token e Phone Number ID da Meta
@@ -24,9 +24,14 @@ Projeto Python do zero para atendimento via **WhatsApp Cloud API (Meta)** com:
 │   ├── main.py
 │   └── services.py
 ├── db/
+│   ├── migrations/
 │   └── schema.sql
+├── scripts/
 ├── .env.example
+├── Makefile
+├── pyproject.toml
 ├── requirements.txt
+├── requirements-dev.txt
 └── README.md
 ```
 
@@ -48,6 +53,8 @@ Preencha:
 - `INACTIVITY_TIMEOUT_MINUTES` (padrão: `15`)
 - `INACTIVITY_CHECK_INTERVAL_SECONDS` (padrão: `60`)
 - `OBSERVABILITY_INTERNAL_ONLY` (`true`/`false`, padrão: `true`) para restringir `/metrics` e `/health/*` a rede interna
+- `OPERATOR_PANEL_ENABLED` (`true`/`false`, padrão: `false`) para habilitar o painel interno de atendimento humano em `/operator`
+- `OPERATOR_PANEL_TOKEN` para proteger o painel interno quando habilitado
 - `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
 - `APP_DEBUG_LOG_MODE` (`true`/`false`, padrão: `false`) para habilitar logs detalhados de diagnóstico (payload recebido, decisão do roteador e resposta da Meta)
 - `WEBHOOK_RATE_LIMIT_PER_MINUTE` (padrão: `120`) para limitar chamadas por IP no webhook; use a borda/proxy como proteção principal.
@@ -61,8 +68,16 @@ Preencha:
 
 ## 4) Criar tabelas no PostgreSQL
 
+Bootstrap inicial de um banco vazio:
+
 ```bash
 psql -h 127.0.0.1 -U postgres -d lavpop_chatbot -f db/schema.sql
+```
+
+Evolução versionada de schema antes de restart/deploy:
+
+```bash
+make migrate
 ```
 
 > A aplicação tenta criar automaticamente objetos mínimos em ambientes permissivos, mas
@@ -79,6 +94,15 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Fluxo recomendado para desenvolvimento:
+
+```bash
+make install-dev
+make test
+make lint
+make run
 ```
 
 Serviço systemd de produção:
@@ -104,6 +128,8 @@ curl http://localhost:8000/metrics
 > Por padrão (`OBSERVABILITY_INTERNAL_ONLY=true`), os endpoints operacionais
 > `/metrics` e `/health/*` só aceitam origem interna (IP privado/loopback/link-local).
 > Requisições externas recebem HTTP 403.
+> Em `APP_ENV=prod|production`, `/docs`, `/redoc` e `/openapi.json` ficam
+> desabilitados para evitar exposição de documentação interativa em produção.
 
 - `GET /health/live`: confirma que o processo da API está ativo.
 - `GET /health/ready`: valida prontidão real consultando o banco (`SELECT 1`).
@@ -114,6 +140,8 @@ Regras de alertas operacionais (Prometheus) para disponibilidade e erro de proce
 
 - `monitoring/prometheus/alerts.yml`
 - `docs/ALERTING_SETUP_2026-04-20.md`
+- `docs/PRODUCTION_CONTROLLED_GO_LIVE_2026-04-25.md`
+- `docs/LOGGING_AND_DATA_RETENTION_POLICY.md`
 
 ## 6) Webhook da Meta
 
@@ -144,9 +172,10 @@ No painel da Meta, configure:
 
 ## 8) Próximos passos recomendados
 
-- Evoluir suíte de testes automatizados (pytest) com cenários de integração reais em PostgreSQL.
+- Executar testes de integração reais em PostgreSQL antes de cada release.
 - Criar painel administrativo para manter FAQ e intenções.
 - Publicar o chatbot atrás de Nginx usando os templates em `deploy/nginx/`.
+- Aplicar migrações versionadas com `scripts/db_migrate.py` ou `make migrate` antes do restart.
 - Rodar backup e restore de banco com `scripts/postgres_backup.py`, `scripts/postgres_restore.py` e `scripts/postgres_restore_drill.py`.
 - Diagnosticar DNS, Nginx, firewall e serviço com `scripts/edge_diagnose.py`.
 - Usar o smoke test de produção em `scripts/production_smoke_test.py` após cada deploy.
@@ -185,13 +214,13 @@ Checklist:
 Suite completa de testes unitários:
 
 ```bash
-pytest -q
+make test
 ```
 
 Para validar especificamente a assinatura HMAC do webhook e evitar regressões:
 
 ```bash
-pytest tests/test_hmac_signature_validation.py
+.venv/bin/python -m pytest tests/test_hmac_signature_validation.py
 ```
 
 Cenários cobertos:
@@ -225,9 +254,30 @@ pytest -m integration -q
 > Para evitar ambiguidade entre ambientes, prefira definir `TEST_POSTGRES_DSN` explicitamente.
 > No CI de release (branch `main`/tags `v*`), a suíte de integração com PostgreSQL é obrigatória como gate.
 >
-> O job `Deploy release (blocked by integration gate)` só executa depois dos jobs `tests` + `Integration tests (release gate)` com sucesso e ainda valida baseline estrito de segurança via secrets (`APP_ENV`, `META_VALIDATE_SIGNATURE`, `META_REQUIRE_APP_SECRET`, `META_APP_SECRET`).
+> O job `Release gate (manual deploy)` só executa depois dos jobs `quality`, `tests` e `Integration tests (release gate)` com sucesso e ainda valida baseline estrito de segurança via secrets (`APP_ENV`, `META_VALIDATE_SIGNATURE`, `META_REQUIRE_APP_SECRET`, `META_APP_SECRET`).
 
-## 11) Ajuste rápido da regra `o_que_lavar` (PostgreSQL)
+### 10.2) Qualidade estática
+
+O CI executa `ruff` e `compileall` no job `quality`. Localmente:
+
+```bash
+make lint
+make compile
+```
+
+## 11) Produção controlada
+
+O repositório está organizado para **produção controlada** com deploy manual supervisionado. O job `Release gate (manual deploy)` valida baseline de segurança, integração e smoke público, mas não executa publicação automática de infraestrutura.
+
+Antes do go-live:
+
+- aplicar migrations com `make migrate`;
+- validar backup e restore drill;
+- confirmar Nginx/borda, rate limit e bloqueio externo de endpoints operacionais;
+- preencher `docs/PRODUCTION_CONTROLLED_GO_LIVE_2026-04-25.md` com evidências reais;
+- manter branch protection/ruleset em `main` exigindo `quality`, `tests` e `Integration tests (release gate)`.
+
+## 12) Ajuste rápido da regra `o_que_lavar` (PostgreSQL)
 
 Se o menu "4) Serviços disponíveis" estiver retornando itens que a unidade não oferece,
 atualize a regra `o_que_lavar` no banco:
@@ -244,7 +294,7 @@ SELECT nome_regra, palavras_chave, resposta
  WHERE nome_regra = 'o_que_lavar';
 ```
 
-## 12) Publicar alterações no Git
+## 13) Publicar alterações no Git
 
 Para validar, commitar e enviar as alterações para `origin`:
 
@@ -264,7 +314,7 @@ O script:
 - cria o commit com a mensagem informada;
 - envia para a branch atual com `git push -u origin <branch>`.
 
-## 13) Roteador de conversas (bot + humano)
+## 14) Roteador de conversas (bot + humano)
 
 O webhook agora funciona como roteador:
 
@@ -273,13 +323,6 @@ Webhook
   -> salva mensagem em chatbot.mensagens
   -> consulta modo da conversa em chatbot.contexto_cliente
   -> bot responde OU atendimento humano assume OU só registra
-
-## 14) Operação de produção
-
-Checklist operacional e fluxo de deploy:
-
-- `docs/PRODUCTION_OPERATION_CHECKLIST.md`
-- `scripts/production_smoke_test.py`
 ```
 
 Para bancos já existentes, aplique a migração incremental:
@@ -300,3 +343,41 @@ Regras atuais:
 - Mensagem `5` ou termos como `atendente`, `falar com humano`, `/humano` e `/pausar` colocam a conversa em `aguardando_humano`.
 - Enquanto a conversa estiver em `aguardando_humano` ou `humano`, o bot não responde automaticamente.
 - `/retomar`, `retomar bot`, `voltar bot` ou `ativar bot` devolvem a conversa ao modo `bot`.
+
+## 15) Painel interno de atendimento humano
+
+O painel `/operator` permite que a equipe veja conversas, assuma atendimento,
+responda pela WhatsApp Cloud API oficial e devolva a conversa ao bot.
+Ele não usa WhatsApp Web.
+
+Configuração mínima:
+
+```bash
+OPERATOR_PANEL_ENABLED=true
+OPERATOR_PANEL_TOKEN=troque-este-token
+```
+
+Acesso inicial:
+
+```text
+http://localhost:8000/operator?token=troque-este-token
+```
+
+Depois do primeiro acesso, o painel usa cookie HTTP-only. As APIs também aceitam
+o header `X-Operator-Token`. Em produção, mantenha o painel restrito por rede
+interna/borda operacional; se `APP_ENV=prod|production` e o painel estiver
+habilitado sem `OPERATOR_PANEL_TOKEN`, a aplicação falha no startup.
+
+Fluxo operacional:
+
+- `Assumir`: muda `modo_conversa` para `humano`.
+- `Enviar`: envia mensagem humana pela Meta e salva outbound em `chatbot.mensagens`.
+- `Devolver ao bot`: muda `modo_conversa` para `bot`.
+- `Encerrar`: muda `modo_conversa` para `encerrado` e `status` para `encerrado`.
+
+## 16) Operação de produção
+
+Checklist operacional e fluxo de deploy:
+
+- `docs/PRODUCTION_OPERATION_CHECKLIST.md`
+- `scripts/production_smoke_test.py`

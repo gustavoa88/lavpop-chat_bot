@@ -4,11 +4,13 @@ from collections import defaultdict, deque
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 import logging
 from starlette.concurrency import run_in_threadpool
+from starlette.staticfiles import StaticFiles
 import psycopg2
 
 from app.config import load_settings
@@ -17,6 +19,7 @@ from app.db import Database
 from app.network_security import enforce_internal_observability_access
 from app.network_security import resolve_request_ip
 from app.observability import ObservabilityState, build_prometheus_metrics
+from app.operator_panel import create_operator_router
 from app.services import ChatService, PROACTIVE_MENU_MESSAGE
 from app.webhook_parser import ParsedMessageEvent
 from app.webhook_parser import parse_meta_message_events
@@ -124,15 +127,46 @@ def _best_effort_persistence(operation: str, fn):
 
 
 def _enforce_production_security_baseline() -> None:
-    if _is_production() and not settings.meta_require_app_secret:
+    if not _is_production():
+        return
+
+    required_settings = {
+        "META_VERIFY_TOKEN": settings.meta_verify_token,
+        "META_WHATSAPP_TOKEN": settings.meta_whatsapp_token,
+        "META_PHONE_NUMBER_ID": settings.meta_phone_number_id,
+    }
+    missing_settings = [
+        name for name, value in required_settings.items() if not (value or "").strip()
+    ]
+    if missing_settings:
+        raise RuntimeError(
+            "Em produção (APP_ENV=prod|production), as configurações obrigatórias "
+            f"estão ausentes: {', '.join(missing_settings)}."
+        )
+    if not settings.meta_validate_signature:
+        raise RuntimeError(
+            "Em produção (APP_ENV=prod|production), META_VALIDATE_SIGNATURE deve ser true "
+            "para validar a assinatura HMAC do webhook."
+        )
+    if not settings.meta_require_app_secret:
         raise RuntimeError(
             "Em produção (APP_ENV=prod|production), META_REQUIRE_APP_SECRET deve ser true "
             "para impedir modo compatibilidade sem validação HMAC estrita."
         )
-    if _is_production() and settings.app_debug_log_mode:
+    if not (settings.meta_app_secret or "").strip():
+        raise RuntimeError(
+            "Em produção (APP_ENV=prod|production), META_APP_SECRET é obrigatório "
+            "para validar a assinatura HMAC do webhook."
+        )
+    if settings.app_debug_log_mode:
         raise RuntimeError(
             "Em produção (APP_ENV=prod|production), APP_DEBUG_LOG_MODE deve ser false "
             "para evitar logs com payload bruto do webhook."
+        )
+    if settings.operator_panel_enabled and not settings.operator_panel_token:
+        raise RuntimeError(
+            "Em produção (APP_ENV=prod|production), OPERATOR_PANEL_TOKEN é obrigatório "
+            "quando OPERATOR_PANEL_ENABLED=true."
         )
 
 
@@ -186,8 +220,8 @@ async def lifespan(_: FastAPI):
         daemon=True,
     )
 
-    db.start()
     _enforce_production_security_baseline()
+    db.start()
     if settings.meta_validate_signature and not settings.meta_app_secret:
         if settings.meta_require_app_secret:
             raise RuntimeError(
@@ -208,7 +242,22 @@ async def lifespan(_: FastAPI):
         db.stop()
         logger.info("Aplicação finalizada com sucesso.")
 
-app = FastAPI(title="Meta WhatsApp Chatbot", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Meta WhatsApp Chatbot",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None if _is_production() else "/docs",
+    redoc_url=None if _is_production() else "/redoc",
+    openapi_url=None if _is_production() else "/openapi.json",
+)
+
+if settings.operator_panel_enabled:
+    app.mount(
+        "/operator/static",
+        StaticFiles(directory=str(Path(__file__).resolve().parent / "static")),
+        name="operator_static",
+    )
+    app.include_router(create_operator_router(chat_service, settings))
 
 
 @app.get("/")
@@ -293,6 +342,7 @@ def _validate_meta_signature(request: Request, body: bytes) -> None:
         )
     except HTTPException:
         observability_state.mark_signature_failure()
+        observability_state.mark_error_type("signature_failure")
         raise
 
 
@@ -451,6 +501,7 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
             )
             return "send_failed"
 
+        observability_state.mark_response_source("roteador")
         logger.info(
             "Conversa roteada para humano. event_key=%s phone=%s mode=%s reason=%s",
             event_key,
@@ -496,6 +547,7 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
         )
         return "send_failed"
 
+    observability_state.mark_response_source(source)
     logger.info(
         "Mensagem processada com sucesso. event_key=%s phone=%s source=%s rule=%s intent=%s",
         event_key,
@@ -530,6 +582,8 @@ async def _process_meta_webhook(request: Request) -> dict:
     try:
         payload = json.loads(raw_body.decode("utf-8"))
     except json.JSONDecodeError as exc:
+        observability_state.mark_error()
+        observability_state.mark_error_type("invalid_json")
         raise HTTPException(status_code=400, detail="Payload JSON inválido") from exc
 
     logger.info("Webhook recebido. summary=%s payload_hash=%s", _payload_summary(payload), payload_hash[:12])
@@ -555,6 +609,7 @@ async def _process_meta_webhook(request: Request) -> dict:
                 observability_state.mark_recorded()
             else:
                 observability_state.mark_error()
+                observability_state.mark_error_type(result)
             logger.info(
                 "Resultado do processamento do webhook. result=%s type=%s phone=%s payload_hash=%s",
                 result,
@@ -569,6 +624,7 @@ async def _process_meta_webhook(request: Request) -> dict:
                 event.msg_type,
             )
             observability_state.mark_error()
+            observability_state.mark_error_type("exception")
             continue
 
     observability_state.set_last_processing_seconds(time.perf_counter() - started_at)

@@ -179,7 +179,9 @@ def normalize_text(text: str) -> str:
 
 
 def normalize_phone(phone: str) -> str:
-    return (phone or "").replace("whatsapp:", "").strip()
+    normalized = (phone or "").strip()
+    normalized = re.sub(r"^whatsapp:", "", normalized, flags=re.IGNORECASE).strip()
+    return re.sub(r"\D+", "", normalized)
 
 
 def is_sensitive_request(message: str) -> bool:
@@ -455,6 +457,7 @@ class ChatService:
         subject: Optional[str],
         response_type: str,
     ) -> None:
+        normalized_phone = normalize_phone(phone)
         self.db.execute(
             """
             INSERT INTO chatbot.contexto_cliente (
@@ -473,10 +476,11 @@ class ChatService:
                 total_interacoes = chatbot.contexto_cliente.total_interacoes + 1,
                 updated_at = NOW()
             """,
-            (phone, name, intent, subject, response_type),
+            (normalized_phone, name, intent, subject, response_type),
         )
 
     def touch_inbound_context(self, phone: str, name: str, source: str = "cliente") -> None:
+        normalized_phone = normalize_phone(phone)
         self.db.execute(
             """
             INSERT INTO chatbot.contexto_cliente (
@@ -493,7 +497,7 @@ class ChatService:
                 total_interacoes = chatbot.contexto_cliente.total_interacoes + 1,
                 updated_at = NOW()
             """,
-            (phone, name, source),
+            (normalized_phone, name, source),
         )
 
     def set_conversation_mode(
@@ -503,6 +507,7 @@ class ChatService:
         mode: str,
         reason: Optional[str] = None,
     ) -> None:
+        normalized_phone = normalize_phone(phone)
         self.db.execute(
             """
             INSERT INTO chatbot.contexto_cliente (
@@ -520,7 +525,7 @@ class ChatService:
                 ultimo_handoff_motivo = EXCLUDED.ultimo_handoff_motivo,
                 updated_at = NOW()
             """,
-            (phone, name, mode, reason),
+            (normalized_phone, name, mode, reason),
         )
 
     def save_message(
@@ -538,6 +543,7 @@ class ChatService:
         rule_name: Optional[str] = None,
         intent: Optional[str] = None,
     ) -> None:
+        normalized_phone = normalize_phone(phone)
         payload_json = json.dumps(payload or {}, ensure_ascii=False, default=_json_default_serializer)
         self.db.execute(
             """
@@ -551,7 +557,7 @@ class ChatService:
             """,
             (
                 event_key,
-                phone,
+                normalized_phone,
                 name,
                 direction,
                 origin,
@@ -579,6 +585,7 @@ class ChatService:
         )
 
     def mark_context_closed_for_inactivity(self, phone: str) -> None:
+        normalized_phone = normalize_phone(phone)
         self.db.execute(
             """
             UPDATE chatbot.contexto_cliente
@@ -589,7 +596,7 @@ class ChatService:
                AND status = 'ativo'
                AND modo_conversa = 'bot'
             """,
-            (phone,),
+            (normalized_phone,),
         )
 
     def close_inactive_conversations(self) -> int:
@@ -624,8 +631,119 @@ class ChatService:
     def get_customer_context(self, phone: str) -> Optional[dict]:
         return self.db.fetchone(
             "SELECT * FROM chatbot.contexto_cliente WHERE telefone = %s",
-            (phone,),
+            (normalize_phone(phone),),
         )
+
+    def list_operator_conversations(self, mode: str = "aguardando_humano", limit: int = 50) -> list[dict]:
+        allowed_modes = {"aguardando_humano", "humano", "bot", "encerrado"}
+        normalized_mode = (mode or "aguardando_humano").strip().lower()
+        if normalized_mode not in allowed_modes:
+            normalized_mode = "aguardando_humano"
+
+        return self.db.fetchall(
+            """
+            SELECT
+                c.telefone,
+                COALESCE(c.nome, '') AS nome,
+                c.status,
+                c.modo_conversa,
+                c.ultima_interacao,
+                COALESCE(m.conteudo_texto, '') AS ultima_mensagem,
+                COALESCE(m.direcao, '') AS ultima_direcao,
+                m.created_at AS ultima_mensagem_em
+              FROM chatbot.contexto_cliente c
+              LEFT JOIN LATERAL (
+                    SELECT conteudo_texto, direcao, created_at
+                      FROM chatbot.mensagens
+                     WHERE telefone = c.telefone
+                     ORDER BY created_at DESC, id DESC
+                     LIMIT 1
+              ) m ON TRUE
+             WHERE c.modo_conversa = %s
+             ORDER BY c.ultima_interacao DESC
+             LIMIT %s
+            """,
+            (normalized_mode, max(1, min(int(limit), 100))),
+        )
+
+    def list_operator_messages(self, phone: str, limit: int = 100) -> list[dict]:
+        normalized_phone = normalize_phone(phone)
+        return self.db.fetchall(
+            """
+            SELECT
+                id,
+                telefone,
+                COALESCE(nome_contato, '') AS nome_contato,
+                direcao,
+                origem,
+                tipo,
+                COALESCE(conteudo_texto, '') AS conteudo_texto,
+                status,
+                COALESCE(resposta_origem, '') AS resposta_origem,
+                COALESCE(regra_nome, '') AS regra_nome,
+                COALESCE(intencao, '') AS intencao,
+                created_at
+              FROM chatbot.mensagens
+             WHERE telefone = %s
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            (normalized_phone, max(1, min(int(limit), 200))),
+        )
+
+    def set_operator_conversation_mode(
+        self,
+        phone: str,
+        mode: str,
+        reason: str,
+        status: str = "ativo",
+    ) -> None:
+        normalized_phone = normalize_phone(phone)
+        self.db.execute(
+            """
+            UPDATE chatbot.contexto_cliente
+               SET modo_conversa = %s,
+                   status = %s,
+                   ultimo_handoff_em = NOW(),
+                   ultimo_handoff_motivo = %s,
+                   updated_at = NOW()
+             WHERE telefone = %s
+            """,
+            (mode, status, reason, normalized_phone),
+        )
+
+    def send_human_message(self, phone: str, text: str) -> bool:
+        normalized_phone = normalize_phone(phone)
+        normalized_text = (text or "").strip()
+        if not normalized_phone or not normalized_text:
+            raise ValueError("Telefone e mensagem são obrigatórios.")
+
+        sent = self.send_meta_message(normalized_phone, normalized_text)
+        self.save_message(
+            phone=normalized_phone,
+            name="",
+            direction="outbound",
+            origin="atendente",
+            text=normalized_text,
+            status="sent" if sent else "send_failed",
+            response_source="humano",
+            intent="atendimento_humano",
+        )
+        self.save_log(
+            phone=normalized_phone,
+            name="",
+            client_msg="[atendente]",
+            bot_msg=normalized_text,
+            source="humano",
+            rule_name="atendimento_humano",
+        )
+        self.set_operator_conversation_mode(
+            normalized_phone,
+            "humano",
+            "resposta_humana",
+            status="ativo",
+        )
+        return sent
 
     def save_log(
         self,
@@ -636,6 +754,7 @@ class ChatService:
         source: str,
         rule_name: Optional[str],
     ) -> None:
+        normalized_phone = normalize_phone(phone)
         self.db.execute(
             """
             INSERT INTO chatbot.log_conversas (
@@ -643,10 +762,14 @@ class ChatService:
                 resposta_bot, origem_resposta, regra_nome
             ) VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (phone, name, client_msg, bot_msg, source, rule_name),
+            (normalized_phone, name, client_msg, bot_msg, source, rule_name),
         )
 
     def send_meta_message(self, destination: str, text: str) -> bool:
+        normalized_destination = normalize_phone(destination)
+        if not normalized_destination:
+            logger.error("Envio para Meta ignorado por destino vazio após normalização.")
+            return False
         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
             logger.error(
                 "Envio para Meta ignorado por configuração ausente. token=%s phone_number_id=%s",
@@ -659,20 +782,20 @@ class ChatService:
         if now < self._meta_send_blocked_until:
             logger.warning(
                 "Envio para Meta temporariamente desabilitado por erro de autenticação anterior. destino=%s",
-                _phone_log_id(destination),
+                _phone_log_id(normalized_destination),
             )
             return False
 
         url = f"https://graph.facebook.com/v23.0/{self.settings.meta_phone_number_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
-            "to": destination,
+            "to": normalized_destination,
             "type": "text",
             "text": {"body": text},
         }
         self._debug_log(
             "Tentativa envio Meta text. destino=%s endpoint_phone_number_id=%s text_preview=%s",
-            _phone_log_id(destination),
+            _phone_log_id(normalized_destination),
             self.settings.meta_phone_number_id or "ausente",
             (text or "").strip()[:120],
         )
@@ -697,7 +820,7 @@ class ChatService:
                         getattr(response, "status", "n/a"),
                         response_body[:400],
                     )
-                    logger.info("Mensagem enviada com sucesso para %s", _phone_log_id(destination))
+                    logger.info("Mensagem enviada com sucesso para %s", _phone_log_id(normalized_destination))
                     return True
 
             except HTTPError as exc:
@@ -711,7 +834,7 @@ class ChatService:
                         attempt,
                         max_attempts,
                         exc.code,
-                        _phone_log_id(destination),
+                        _phone_log_id(normalized_destination),
                     )
                     time.sleep(wait_seconds)
                     continue
@@ -730,7 +853,7 @@ class ChatService:
                     attempt,
                     max_attempts if retryable else attempt,
                     exc.code,
-                    _phone_log_id(destination),
+                    _phone_log_id(normalized_destination),
                     details or "-",
                 )
                 self._debug_log("HTTPError Meta text payload=%s", json.dumps(payload, ensure_ascii=False)[:400])
@@ -743,7 +866,7 @@ class ChatService:
                         "Falha de rede ao enviar mensagem Meta. tentativa=%s/%s destino=%s erro=%s",
                         attempt,
                         max_attempts,
-                        _phone_log_id(destination),
+                        _phone_log_id(normalized_destination),
                         exc,
                     )
                     time.sleep(wait_seconds)
@@ -753,12 +876,16 @@ class ChatService:
                     "Falha de rede final ao enviar mensagem Meta. tentativa=%s/%s destino=%s erro=%s",
                     attempt,
                     max_attempts,
-                    _phone_log_id(destination),
+                    _phone_log_id(normalized_destination),
                     exc,
                 )
                 return False
 
     def send_meta_menu_message(self, destination: str) -> bool:
+        normalized_destination = normalize_phone(destination)
+        if not normalized_destination:
+            logger.error("Envio de menu para Meta ignorado por destino vazio após normalização.")
+            return False
         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
             logger.error(
                 "Envio de menu para Meta ignorado por configuração ausente. token=%s phone_number_id=%s",
@@ -771,14 +898,14 @@ class ChatService:
         if now < self._meta_send_blocked_until:
             logger.warning(
                 "Envio de menu para Meta temporariamente desabilitado por erro de autenticação anterior. destino=%s",
-                _phone_log_id(destination),
+                _phone_log_id(normalized_destination),
             )
             return False
 
         url = f"https://graph.facebook.com/v23.0/{self.settings.meta_phone_number_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
-            "to": destination,
+            "to": normalized_destination,
             "type": "interactive",
             "interactive": {
                 "type": "list",
@@ -798,7 +925,7 @@ class ChatService:
         }
         self._debug_log(
             "Tentativa envio Meta menu. destino=%s endpoint_phone_number_id=%s",
-            _phone_log_id(destination),
+            _phone_log_id(normalized_destination),
             self.settings.meta_phone_number_id or "ausente",
         )
 
@@ -820,7 +947,7 @@ class ChatService:
                     getattr(response, "status", "n/a"),
                     response_body[:400],
                 )
-                logger.info("Menu interativo enviado com sucesso para %s", _phone_log_id(destination))
+                logger.info("Menu interativo enviado com sucesso para %s", _phone_log_id(normalized_destination))
                 return True
         except HTTPError as exc:
             details = _http_error_body(exc)
@@ -829,14 +956,14 @@ class ChatService:
             logger.error(
                 "Falha HTTP ao enviar menu interativo Meta. code=%s destino=%s detalhe=%s",
                 exc.code,
-                _phone_log_id(destination),
+                _phone_log_id(normalized_destination),
                 details or "-",
             )
             return False
         except (URLError, TimeoutError) as exc:
             logger.error(
                 "Falha de rede ao enviar menu interativo Meta. destino=%s erro=%s",
-                _phone_log_id(destination),
+                _phone_log_id(normalized_destination),
                 exc,
             )
             return False

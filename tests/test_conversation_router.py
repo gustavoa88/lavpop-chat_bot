@@ -1,6 +1,7 @@
 from app.conversation_router import (
     BOT_ACTION,
     HANDOFF_ACTION,
+    REGISTER_ONLY_ACTION,
     WAITING_HUMAN_MODE,
     ConversationRouter,
 )
@@ -14,15 +15,15 @@ def test_router_sends_menu_option_5_to_human_handoff():
     assert decision.answer
 
 
-def test_router_informs_waiting_human_mode_instead_of_silence():
+def test_router_records_waiting_human_mode_without_auto_reply():
     decision = ConversationRouter().decide(
         "mais uma dúvida",
         {"modo_conversa": "aguardando_humano"},
     )
 
-    assert decision.action == HANDOFF_ACTION
+    assert decision.action == REGISTER_ONLY_ACTION
     assert decision.mode == "aguardando_humano"
-    assert decision.answer
+    assert decision.answer is None
 
 
 def test_router_resume_command_returns_to_bot():

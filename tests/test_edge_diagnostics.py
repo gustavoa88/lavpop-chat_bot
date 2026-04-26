@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-from urllib.error import URLError
 
 import app.edge_diagnostics as edge_diagnostics
 

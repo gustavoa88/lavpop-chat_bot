@@ -19,6 +19,8 @@ class ObservabilityState:
         self.messages_duplicate_total = 0
         self.processing_errors_total = 0
         self.signature_failures_total = 0
+        self.response_source_totals: dict[str, int] = {}
+        self.processing_error_totals_by_type: dict[str, int] = {}
         self.last_processing_seconds = 0.0
         self.webhook_processing_duration_count = 0
         self.webhook_processing_duration_sum = 0.0
@@ -50,6 +52,20 @@ class ObservabilityState:
         with self._lock:
             self.processing_errors_total += 1
 
+    def mark_error_type(self, error_type: str) -> None:
+        normalized_type = _normalize_label_value(error_type)
+        with self._lock:
+            self.processing_error_totals_by_type[normalized_type] = (
+                self.processing_error_totals_by_type.get(normalized_type, 0) + 1
+            )
+
+    def mark_response_source(self, source: str) -> None:
+        normalized_source = _normalize_label_value(source)
+        with self._lock:
+            self.response_source_totals[normalized_source] = (
+                self.response_source_totals.get(normalized_source, 0) + 1
+            )
+
     def mark_signature_failure(self) -> None:
         with self._lock:
             self.signature_failures_total += 1
@@ -73,11 +89,29 @@ class ObservabilityState:
                 "messages_duplicate_total": float(self.messages_duplicate_total),
                 "processing_errors_total": float(self.processing_errors_total),
                 "signature_failures_total": float(self.signature_failures_total),
+                "response_source_totals": dict(self.response_source_totals),
+                "processing_error_totals_by_type": dict(self.processing_error_totals_by_type),
                 "last_processing_seconds": self.last_processing_seconds,
                 "webhook_processing_duration_count": float(self.webhook_processing_duration_count),
                 "webhook_processing_duration_sum": float(self.webhook_processing_duration_sum),
                 "webhook_processing_duration_buckets": dict(self.webhook_processing_duration_buckets),
             }
+
+
+def _normalize_label_value(value: str) -> str:
+    normalized = (value or "unknown").strip().lower()
+    return "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in normalized) or "unknown"
+
+
+def _labeled_counter_lines(
+    metric_name: str,
+    label_name: str,
+    values: dict[str, int] | dict[str, float],
+) -> list[str]:
+    return [
+        f'{metric_name}{{{label_name}="{label_value}"}} {int(count)}'
+        for label_value, count in sorted(values.items())
+    ]
 
 
 def build_prometheus_metrics(
@@ -107,6 +141,20 @@ def build_prometheus_metrics(
         "# HELP chatbot_message_processing_errors_total Total de erros no processamento de mensagens.",
         "# TYPE chatbot_message_processing_errors_total counter",
         f"chatbot_message_processing_errors_total {int(snapshot['processing_errors_total'])}",
+        "# HELP chatbot_message_processing_errors_by_type_total Total de erros no processamento por tipo.",
+        "# TYPE chatbot_message_processing_errors_by_type_total counter",
+        *_labeled_counter_lines(
+            "chatbot_message_processing_errors_by_type_total",
+            "type",
+            snapshot.get("processing_error_totals_by_type", {}),
+        ),
+        "# HELP chatbot_responses_by_source_total Total de respostas enviadas por origem.",
+        "# TYPE chatbot_responses_by_source_total counter",
+        *_labeled_counter_lines(
+            "chatbot_responses_by_source_total",
+            "source",
+            snapshot.get("response_source_totals", {}),
+        ),
         "# HELP chatbot_webhook_signature_failures_total Total de falhas de validação da assinatura do webhook.",
         "# TYPE chatbot_webhook_signature_failures_total counter",
         f"chatbot_webhook_signature_failures_total {int(snapshot.get('signature_failures_total', 0))}",

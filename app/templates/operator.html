@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ service_name }}</title>
+    <link rel="stylesheet" href="/operator/static/operator.css">
+  </head>
+  <body data-default-mode="{{ default_mode }}">
+    <main class="operator-shell">
+      <aside class="conversation-list">
+        <header class="panel-header">
+          <h1>Atendimento</h1>
+          <select id="modeFilter" aria-label="Filtro de conversas">
+            <option value="aguardando_humano">Aguardando</option>
+            <option value="humano">Em atendimento</option>
+            <option value="bot">Bot</option>
+            <option value="encerrado">Encerradas</option>
+          </select>
+        </header>
+        <div id="conversationList" class="list-items" aria-live="polite"></div>
+      </aside>
+
+      <section class="conversation-pane">
+        <header class="conversation-header">
+          <div>
+            <p id="selectedName" class="selected-name">Selecione uma conversa</p>
+            <p id="selectedPhone" class="selected-phone"></p>
+          </div>
+          <div class="actions">
+            <button id="claimButton" type="button">Assumir</button>
+            <button id="returnButton" type="button">Devolver ao bot</button>
+            <button id="closeButton" type="button">Encerrar</button>
+          </div>
+        </header>
+
+        <div id="messageList" class="message-list" aria-live="polite"></div>
+
+        <form id="replyForm" class="reply-form">
+          <textarea id="replyText" rows="3" placeholder="Digite a resposta humana"></textarea>
+          <button type="submit">Enviar</button>
+        </form>
+      </section>
+    </main>
+    <script src="/operator/static/operator.js"></script>
+  </body>
+</html>

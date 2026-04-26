@@ -106,6 +106,24 @@ def test_post_webhook_meta_rejects_invalid_hmac_signature(monkeypatch):
 
     metrics_response = _request(main_module.app, "GET", "/metrics")
     assert "chatbot_webhook_signature_failures_total 1" in metrics_response.text
+    assert 'chatbot_message_processing_errors_by_type_total{type="signature_failure"} 1' in metrics_response.text
+
+
+def test_post_webhook_meta_rejects_invalid_json_and_tracks_error_type(monkeypatch):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="")
+
+    response = _request(
+        main_module.app,
+        "POST",
+        "/webhook/meta",
+        content=b"{invalid",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Payload JSON inválido"
+
+    metrics_response = _request(main_module.app, "GET", "/metrics")
+    assert 'chatbot_message_processing_errors_by_type_total{type="invalid_json"} 1' in metrics_response.text
 
 
 def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
@@ -314,6 +332,8 @@ def test_startup_fails_in_production_with_debug_log_mode(monkeypatch):
     monkeypatch.setenv("META_VALIDATE_SIGNATURE", "true")
     monkeypatch.setenv("META_REQUIRE_APP_SECRET", "true")
     monkeypatch.setenv("META_APP_SECRET", "topsecret")
+    monkeypatch.setenv("META_WHATSAPP_TOKEN", "whatsapp-token")
+    monkeypatch.setenv("META_PHONE_NUMBER_ID", "phone-number-id")
 
     import app.main as main_module
 
@@ -327,6 +347,27 @@ def test_startup_fails_in_production_with_debug_log_mode(monkeypatch):
 
     with pytest.raises(RuntimeError, match="APP_DEBUG_LOG_MODE deve ser false"):
         asyncio.run(start_app())
+
+
+def test_production_disables_interactive_api_docs(monkeypatch):
+    for key, value in DEFAULT_ENV.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("APP_DEBUG_LOG_MODE", "false")
+    monkeypatch.setenv("META_VALIDATE_SIGNATURE", "true")
+    monkeypatch.setenv("META_REQUIRE_APP_SECRET", "true")
+    monkeypatch.setenv("META_APP_SECRET", "topsecret")
+    monkeypatch.setenv("META_WHATSAPP_TOKEN", "whatsapp-token")
+    monkeypatch.setenv("META_PHONE_NUMBER_ID", "phone-number-id")
+
+    import app.main as main_module
+
+    main_module = importlib.reload(main_module)
+
+    assert _request(main_module.app, "GET", "/docs").status_code == 404
+    assert _request(main_module.app, "GET", "/redoc").status_code == 404
+    assert _request(main_module.app, "GET", "/openapi.json").status_code == 404
 
 
 def test_post_webhook_meta_rate_limits_when_limit_is_exceeded(monkeypatch):
@@ -451,7 +492,7 @@ def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypa
         return "Resposta teste", "menu", None, "menu_opcao_2"
 
     main_module.chat_service.answer_message = fake_answer_message
-    main_module.chat_service.send_meta_message = lambda phone, answer: None
+    main_module.chat_service.send_meta_message = lambda phone, answer: True
     main_module.chat_service.send_meta_menu_message = lambda phone: True
 
     payload = {
@@ -484,10 +525,12 @@ def test_post_webhook_meta_interactive_button_reply_maps_to_menu_option(monkeypa
     }
 
     response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
+    metrics_response = _request(main_module.app, "GET", "/metrics")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert answered_messages == [("5511999999999", "2")]
+    assert 'chatbot_responses_by_source_total{source="menu"} 1' in metrics_response.text
 
 
 def test_post_webhook_meta_register_only_action_increments_recorded_metric(monkeypatch):

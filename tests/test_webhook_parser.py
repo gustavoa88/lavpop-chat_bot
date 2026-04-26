@@ -33,6 +33,33 @@ def test_parse_meta_message_events_extracts_text_and_contact_name():
     assert events[0].msg_type == "text"
 
 
+def test_parse_meta_message_events_normalizes_phone_to_digits():
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "id": "wamid.1",
+                                    "type": "text",
+                                    "from": "whatsapp:+55 (11) 99999-8888",
+                                    "text": {"body": "Oi"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    events = parse_meta_message_events(payload)
+
+    assert events[0].phone == "5511999998888"
+
+
 def test_parse_meta_message_events_resolves_interactive_button_reply_to_option():
     payload = {
         "entry": [

@@ -172,6 +172,7 @@ No painel da Meta, configure:
 
 ## 8) Próximos passos recomendados
 
+- Consultar `docs/PR_THEME_ROADMAP.md` antes de abrir qualquer PR de melhoria.
 - Executar testes de integração reais em PostgreSQL antes de cada release.
 - Criar painel administrativo para manter FAQ e intenções.
 - Publicar o chatbot atrás de Nginx usando os templates em `deploy/nginx/`.

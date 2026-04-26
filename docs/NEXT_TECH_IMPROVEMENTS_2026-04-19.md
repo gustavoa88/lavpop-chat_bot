@@ -15,29 +15,21 @@ Com base no código e na suíte de testes atual:
 
 ## Backlog técnico priorizado (próximo ciclo)
 
-1. **Separar orquestração do webhook em camadas explícitas**
-   - Extrair parsing do payload Meta para um módulo próprio (`app/webhook_parser.py`).
-   - Extrair idempotência/event key para serviço dedicado.
-   - Benefício: reduzir complexidade ciclomática de `app/main.py` e facilitar testes unitários puros.
+O backlog agora é organizado por PR temático em `docs/PR_THEME_ROADMAP.md`.
+Os três temas principais são:
 
-2. **Instrumentação de métricas por tipo de origem de resposta**
-   - Adicionar contadores por fonte (`menu`, `banco`, `ia`) e por tipo de falha.
-   - Benefício: decisões de produto e tuning de base de FAQ guiadas por dados reais.
+1. **Segurança e LGPD**
+   - Redaction de logs e previews.
+   - Retenção e exposição de dados sensíveis.
 
-3. **Testes de contrato do payload Meta**
-   - Criar casos cobrindo variações reais de `messages[].type` (text, button, interactive list/button, statuses).
-   - Benefício: reduzir regressões causadas por payloads parciais ou mudanças do provedor.
+2. **Governança de deploy**
+   - Preflight, runbook, smoke e checklist de produção.
 
-4. **Fail-fast de configuração em ambientes sensíveis**
-   - Tornar recomendação de produção mais explícita no startup (ex.: bloquear envio Meta sem token/phone id quando `ENV=prod`).
-   - Benefício: evitar incidentes silenciosos de configuração.
-
-5. **Resiliência de banco para cargas maiores**
-   - Revisar sizing do pool (`db_min_conn`, `db_max_conn`) e métricas do pool em runtime.
-   - Benefício: prevenir gargalos e timeout sob pico de webhooks.
+3. **Arquitetura do webhook**
+   - Parsing, orquestração, idempotência, métricas e testes de contrato.
 
 ## Critério de sucesso para o próximo ciclo
 
-- `app/main.py` com menor responsabilidade (parse/orquestração separadas).
-- Novas métricas disponíveis em `/metrics` para origem de resposta e erros por categoria.
-- Testes cobrindo variações de payload Meta com foco em estabilidade.
+- Cada novo PR deve nascer de `main` e carregar apenas um tema.
+- Cada PR deve ter testes que provem o comportamento alterado.
+- Revisões e rollback devem ser possíveis sem depender de um bundle grande de mudanças.

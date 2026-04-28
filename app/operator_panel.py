@@ -109,13 +109,7 @@ def create_operator_router(chat_service: ChatService, settings: Settings) -> API
     async def return_to_bot(request: Request, phone: str):
         _require_operator_access(request, settings)
         normalized_phone = normalize_phone(phone)
-        chat_service.set_operator_conversation_mode(
-            normalized_phone,
-            "bot",
-            "devolvido_ao_bot",
-            status="ativo",
-        )
-        return {"status": "ok", "mode": "bot"}
+        return chat_service.return_conversation_to_bot(normalized_phone)
 
     @router.post("/api/conversations/{phone}/close")
     async def close_conversation(request: Request, phone: str):

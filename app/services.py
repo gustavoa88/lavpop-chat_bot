@@ -33,6 +33,11 @@ INACTIVITY_CLOSING_MESSAGE = (
     "Quando quiser, é só me chamar novamente — vai ser um prazer te receber na LavPop! 🧺💙"
 )
 
+RETURN_TO_BOT_TRANSITION_MESSAGE = (
+    "✅ Atendimento humano finalizado. Voltei a te atender por aqui.\n"
+    "Vou abrir o menu para você escolher a próxima opção 🙂"
+)
+
 PROACTIVE_MENU_OPTIONS = {
     "1": {
         "intent": "menu_opcao_1",
@@ -744,6 +749,70 @@ class ChatService:
             status="ativo",
         )
         return sent
+
+    def return_conversation_to_bot(self, phone: str) -> dict[str, bool | str]:
+        normalized_phone = normalize_phone(phone)
+        if not normalized_phone:
+            raise ValueError("Telefone é obrigatório.")
+
+        self.set_operator_conversation_mode(
+            normalized_phone,
+            "bot",
+            "devolvido_ao_bot",
+            status="ativo",
+        )
+
+        transition_sent = self.send_meta_message(normalized_phone, RETURN_TO_BOT_TRANSITION_MESSAGE)
+        self.save_message(
+            phone=normalized_phone,
+            name="",
+            direction="outbound",
+            origin="bot",
+            text=RETURN_TO_BOT_TRANSITION_MESSAGE,
+            status="sent" if transition_sent else "send_failed",
+            response_source="roteador",
+            intent="retorno_bot",
+            rule_name="devolvido_ao_bot",
+        )
+        self.save_log(
+            phone=normalized_phone,
+            name="",
+            client_msg="[sistema] retorno do atendimento humano",
+            bot_msg=RETURN_TO_BOT_TRANSITION_MESSAGE,
+            source="roteador",
+            rule_name="devolvido_ao_bot",
+        )
+
+        menu_sent = self.send_meta_menu_message(normalized_phone)
+        if not menu_sent:
+            menu_sent = self.send_meta_message(normalized_phone, PROACTIVE_MENU_MESSAGE)
+
+        self.save_message(
+            phone=normalized_phone,
+            name="",
+            direction="outbound",
+            origin="bot",
+            text=PROACTIVE_MENU_MESSAGE,
+            status="sent" if menu_sent else "send_failed",
+            response_source="menu",
+            intent="menu_inicial",
+            rule_name="retorno_bot_menu",
+        )
+        self.save_log(
+            phone=normalized_phone,
+            name="",
+            client_msg="[sistema] devolvido para bot",
+            bot_msg=PROACTIVE_MENU_MESSAGE,
+            source="menu",
+            rule_name="retorno_bot_menu",
+        )
+
+        return {
+            "status": "ok",
+            "mode": "bot",
+            "transition_sent": transition_sent,
+            "menu_sent": menu_sent,
+        }
 
     def save_log(
         self,

@@ -102,8 +102,13 @@ def test_operator_api_claim_send_return_and_close(monkeypatch):
         calls.append(("send", phone, text))
         return True
 
+    def fake_return_to_bot(phone: str):
+        calls.append(("return", phone))
+        return {"status": "ok", "mode": "bot", "transition_sent": True, "menu_sent": True}
+
     main_module.chat_service.set_operator_conversation_mode = fake_set_mode
     main_module.chat_service.send_human_message = fake_send
+    main_module.chat_service.return_conversation_to_bot = fake_return_to_bot
     headers = {"X-Operator-Token": "panel-token"}
 
     claim = _request(
@@ -135,6 +140,7 @@ def test_operator_api_claim_send_return_and_close(monkeypatch):
     assert claim.json()["mode"] == "humano"
     assert send.json()["sent"] is True
     assert returned.json()["mode"] == "bot"
+    assert returned.json()["menu_sent"] is True
     assert closed.json()["mode"] == "encerrado"
     assert ("send", "5511999999999", "Olá, vou te ajudar.") in calls
-    assert ("mode", "5511999999999", "bot", "devolvido_ao_bot", "ativo") in calls
+    assert ("return", "5511999999999") in calls

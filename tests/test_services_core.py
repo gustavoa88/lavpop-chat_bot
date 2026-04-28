@@ -1,6 +1,8 @@
 from app.config import Settings
 from app.services import (
     ChatService,
+    PROACTIVE_MENU_MESSAGE,
+    RETURN_TO_BOT_TRANSITION_MESSAGE,
     extract_menu_option,
     normalize_phone,
     normalize_text,
@@ -258,3 +260,51 @@ def test_send_human_message_sends_and_records_outbound(monkeypatch):
         "whatsapp:" not in str(params) and "+5511999999999" not in str(params)
         for _, params in fake_db.executed
     )
+
+
+def test_return_conversation_to_bot_sends_transition_and_menu(monkeypatch):
+    service = _build_service()
+    sent_texts = []
+
+    monkeypatch.setattr(service, "set_operator_conversation_mode", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "send_meta_message",
+        lambda destination, text: sent_texts.append((destination, text)) or True,
+    )
+    monkeypatch.setattr(service, "send_meta_menu_message", lambda destination: True)
+    monkeypatch.setattr(service, "save_message", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "save_log", lambda *args, **kwargs: None)
+
+    result = service.return_conversation_to_bot("whatsapp:+5511999999999")
+
+    assert result == {
+        "status": "ok",
+        "mode": "bot",
+        "transition_sent": True,
+        "menu_sent": True,
+    }
+    assert sent_texts == [("5511999999999", RETURN_TO_BOT_TRANSITION_MESSAGE)]
+
+
+def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fails(monkeypatch):
+    service = _build_service()
+    sent_texts = []
+
+    monkeypatch.setattr(service, "set_operator_conversation_mode", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "send_meta_message",
+        lambda destination, text: sent_texts.append((destination, text)) or True,
+    )
+    monkeypatch.setattr(service, "send_meta_menu_message", lambda destination: False)
+    monkeypatch.setattr(service, "save_message", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "save_log", lambda *args, **kwargs: None)
+
+    result = service.return_conversation_to_bot("5511999999999")
+
+    assert result["menu_sent"] is True
+    assert sent_texts == [
+        ("5511999999999", RETURN_TO_BOT_TRANSITION_MESSAGE),
+        ("5511999999999", PROACTIVE_MENU_MESSAGE),
+    ]

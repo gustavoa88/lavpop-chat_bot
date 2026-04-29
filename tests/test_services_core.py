@@ -272,7 +272,12 @@ def test_return_conversation_to_bot_sends_transition_and_menu(monkeypatch):
         "send_meta_message",
         lambda destination, text: sent_texts.append((destination, text)) or True,
     )
-    monkeypatch.setattr(service, "send_meta_menu_message", lambda destination: True)
+    menu_calls = []
+    monkeypatch.setattr(
+        service,
+        "send_meta_menu_message",
+        lambda destination, **kwargs: menu_calls.append((destination, kwargs)) or True,
+    )
     monkeypatch.setattr(service, "save_message", lambda *args, **kwargs: None)
     monkeypatch.setattr(service, "save_log", lambda *args, **kwargs: None)
 
@@ -285,6 +290,7 @@ def test_return_conversation_to_bot_sends_transition_and_menu(monkeypatch):
         "menu_sent": True,
     }
     assert sent_texts == [("5511999999999", RETURN_TO_BOT_TRANSITION_MESSAGE)]
+    assert menu_calls == [("5511999999999", {"include_greeting": False})]
 
 
 def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fails(monkeypatch):
@@ -297,7 +303,7 @@ def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fai
         "send_meta_message",
         lambda destination, text: sent_texts.append((destination, text)) or True,
     )
-    monkeypatch.setattr(service, "send_meta_menu_message", lambda destination: False)
+    monkeypatch.setattr(service, "send_meta_menu_message", lambda destination, **kwargs: False)
     monkeypatch.setattr(service, "save_message", lambda *args, **kwargs: None)
     monkeypatch.setattr(service, "save_log", lambda *args, **kwargs: None)
 

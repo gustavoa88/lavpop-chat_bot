@@ -1094,7 +1094,7 @@ class ChatService:
                     response_origin=base_source,
                     context=context,
                 )
-                source = "ia_router"
+                source = base_source
                 response_type = f"menu_opcao_{base_source}_com_ia"
                 intent = option_intent
                 rule_name = option_rule_name
@@ -1110,7 +1110,7 @@ class ChatService:
                         response_origin="banco",
                         context=context,
                     )
-                    source = "ia_router"
+                    source = "banco"
                     response_type = f"regra_{rule_name}_com_ia"
                 elif is_sensitive_request(message):
                     response = (

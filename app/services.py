@@ -448,6 +448,38 @@ class ChatService:
             "Posso te ajudar com horário, preço e serviços, ou encaminhar para atendimento humano 🙂"
         )
 
+    def ai_router_assist_response(
+        self,
+        *,
+        customer_name: str,
+        user_message: str,
+        base_response: str,
+        response_origin: str,
+        context: Optional[dict],
+    ) -> str:
+        if not self.client:
+            return base_response
+
+        assist_prompt = (
+            "Use a resposta base abaixo como fonte principal.\n"
+            f"Origem da resposta base: {response_origin}\n"
+            f"Resposta base: {base_response}\n\n"
+            "Reescreva em tom natural, claro e objetivo para WhatsApp.\n"
+            "Não invente preços, horários, políticas ou serviços além do que está na resposta base.\n"
+            "Se faltar informação, mantenha o conteúdo essencial sem criar novos dados."
+        )
+        assisted = self.ai_response(
+            message=f"{assist_prompt}\n\nMensagem do cliente: {user_message}",
+            customer_name=customer_name,
+            context=context,
+        )
+        if not assisted:
+            return base_response
+        assisted_norm = assisted.lower()
+        if "sem ia ativa" in assisted_norm or "instabilidade no atendimento automático" in assisted_norm:
+            return base_response
+        return assisted
+
     def save_context(
         self,
         phone: str,
@@ -1054,9 +1086,16 @@ class ChatService:
                 message, rules=active_rules
             )
             if option_response:
-                response = option_response
-                source = option_source or "menu"
-                response_type = f"menu_opcao_{source}"
+                base_source = option_source or "menu"
+                response = self.ai_router_assist_response(
+                    customer_name=name,
+                    user_message=message,
+                    base_response=option_response,
+                    response_origin=base_source,
+                    context=context,
+                )
+                source = base_source
+                response_type = f"menu_opcao_{base_source}_com_ia"
                 intent = option_intent
                 rule_name = option_rule_name
             else:
@@ -1064,9 +1103,15 @@ class ChatService:
                 intent = self.classify_intent(message)
 
                 if rule_answer:
-                    response = rule_answer
+                    response = self.ai_router_assist_response(
+                        customer_name=name,
+                        user_message=message,
+                        base_response=rule_answer,
+                        response_origin="banco",
+                        context=context,
+                    )
                     source = "banco"
-                    response_type = f"regra_{rule_name}"
+                    response_type = f"regra_{rule_name}_com_ia"
                 elif is_sensitive_request(message):
                     response = (
                         "Por segurança, eu não posso informar esse dado por aqui sem validação. "

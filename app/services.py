@@ -783,7 +783,7 @@ class ChatService:
             rule_name="devolvido_ao_bot",
         )
 
-        menu_sent = self.send_meta_menu_message(normalized_phone)
+        menu_sent = self.send_meta_menu_message(normalized_phone, include_greeting=False)
         if not menu_sent:
             menu_sent = self.send_meta_message(normalized_phone, PROACTIVE_MENU_MESSAGE)
 
@@ -950,7 +950,7 @@ class ChatService:
                 )
                 return False
 
-    def send_meta_menu_message(self, destination: str) -> bool:
+    def send_meta_menu_message(self, destination: str, *, include_greeting: bool = True) -> bool:
         normalized_destination = normalize_phone(destination)
         if not normalized_destination:
             logger.error("Envio de menu para Meta ignorado por destino vazio após normalização.")
@@ -978,8 +978,17 @@ class ChatService:
             "type": "interactive",
             "interactive": {
                 "type": "list",
-                "header": {"type": "text", "text": "Oi! Que bom falar com você. 💙"},
-                "body": {"text": "Sobre o que você precisa de ajuda?"},
+                "header": {
+                    "type": "text",
+                    "text": "Oi! Que bom falar com você. 💙"
+                    if include_greeting
+                    else "Vamos continuar por aqui. 💙",
+                },
+                "body": {
+                    "text": "Sobre o que você precisa de ajuda?"
+                    if include_greeting
+                    else "Escolha uma opção para seguir com o atendimento.",
+                },
                 "footer": {"text": "Escreva uma frase curta ou escolha uma opção na lista."},
                 "action": {
                     "button": "Ver opções",

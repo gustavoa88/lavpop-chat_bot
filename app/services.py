@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from openai import OpenAI
 
+from app.ai_persona import LAVPOP_PERSONA_BLUEPRINT
 from app.config import Settings
 from app.db import Database
 
@@ -390,14 +391,7 @@ class ChatService:
         if not self.client:
             return "No momento estou sem IA ativa. Posso te ajudar com horário, preço e serviços 🙂"
 
-        system_prompt = (
-            "Você é atendente virtual da lavanderia LavPop Jardim São Bernardo. "
-            "Responda em português brasileiro, em tom amigável e objetivo. "
-            "Nunca invente dados. "
-            "Se não houver confirmação explícita no contexto, diga que não tem essa informação e encaminhe para atendimento humano. "
-            "Para pedidos sensíveis (senha, código de acesso, credenciais, dados pessoais, dados bancários), "
-            "nunca forneça valores: apenas informe que um atendente humano vai orientar com segurança."
-        )
+        system_prompt = LAVPOP_PERSONA_BLUEPRINT.system_prompt()
 
         context_prompt = (
             f"Contexto cliente: "

@@ -70,7 +70,9 @@ async function loadMessages() {
     `;
     messageList.appendChild(node);
   }
-  messageList.scrollTop = messageList.scrollHeight;
+  requestAnimationFrame(() => {
+    messageList.scrollTop = messageList.scrollHeight;
+  });
 }
 
 function selectConversation(item) {

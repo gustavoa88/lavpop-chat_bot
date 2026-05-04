@@ -31,6 +31,7 @@ class Settings:
     trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
     operator_panel_enabled: bool = False
     operator_panel_token: str = ""
+    operator_alert_whatsapp_number: str = ""
     app_env: str = "dev"
 
 
@@ -134,5 +135,6 @@ def load_settings() -> Settings:
         trusted_proxy_cidrs=trusted_proxy_cidrs,
         operator_panel_enabled=operator_panel_enabled,
         operator_panel_token=os.getenv("OPERATOR_PANEL_TOKEN", "").strip(),
+        operator_alert_whatsapp_number=os.getenv("OPERATOR_ALERT_WHATSAPP_NUMBER", "").strip(),
         app_env=os.getenv("APP_ENV", os.getenv("ENV", "dev")).strip().lower(),
     )

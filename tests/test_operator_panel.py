@@ -30,6 +30,7 @@ DEFAULT_ENV = {
     "OBSERVABILITY_INTERNAL_ONLY": "true",
     "OPERATOR_PANEL_ENABLED": "true",
     "OPERATOR_PANEL_TOKEN": "panel-token",
+    "OPERATOR_ALERT_WHATSAPP_NUMBER": "",
 }
 
 
@@ -106,9 +107,14 @@ def test_operator_api_claim_send_return_and_close(monkeypatch):
         calls.append(("return", phone))
         return {"status": "ok", "mode": "bot", "transition_sent": True, "menu_sent": True}
 
+    def fake_notify(phone: str):
+        calls.append(("notify", phone))
+        return True
+
     main_module.chat_service.set_operator_conversation_mode = fake_set_mode
     main_module.chat_service.send_human_message = fake_send
     main_module.chat_service.return_conversation_to_bot = fake_return_to_bot
+    main_module.chat_service.notify_operator_handoff_start = fake_notify
     headers = {"X-Operator-Token": "panel-token"}
 
     claim = _request(
@@ -138,9 +144,11 @@ def test_operator_api_claim_send_return_and_close(monkeypatch):
     )
 
     assert claim.json()["mode"] == "humano"
+    assert claim.json()["operator_alert_sent"] is True
     assert send.json()["sent"] is True
     assert returned.json()["mode"] == "bot"
     assert returned.json()["menu_sent"] is True
     assert closed.json()["mode"] == "encerrado"
     assert ("send", "5511999999999", "Olá, vou te ajudar.") in calls
     assert ("return", "5511999999999") in calls
+    assert ("notify", "5511999999999") in calls

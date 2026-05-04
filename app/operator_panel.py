@@ -97,7 +97,8 @@ def create_operator_router(chat_service: ChatService, settings: Settings) -> API
             "assumido_no_painel",
             status="ativo",
         )
-        return {"status": "ok", "mode": "humano"}
+        alert_sent = chat_service.notify_operator_handoff_start(normalized_phone)
+        return {"status": "ok", "mode": "humano", "operator_alert_sent": alert_sent}
 
     @router.post("/api/conversations/{phone}/send")
     async def send_human_message(request: Request, phone: str, body: HumanMessageRequest):

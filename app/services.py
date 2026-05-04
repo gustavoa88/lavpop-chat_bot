@@ -776,6 +776,21 @@ class ChatService:
         )
         return sent
 
+    def notify_operator_handoff_start(self, customer_phone: str) -> bool:
+        destination = normalize_phone(self.settings.operator_alert_whatsapp_number)
+        normalized_customer_phone = normalize_phone(customer_phone)
+        if not destination:
+            return False
+        if not normalized_customer_phone:
+            raise ValueError("Telefone do cliente é obrigatório.")
+
+        message = (
+            "🔔 Novo atendimento humano iniciado no painel.\n"
+            f"Cliente: +{normalized_customer_phone}\n"
+            "Acesse o painel para assumir ou continuar o atendimento."
+        )
+        return self.send_meta_message(destination, message)
+
     def return_conversation_to_bot(self, phone: str) -> dict[str, bool | str]:
         normalized_phone = normalize_phone(phone)
         if not normalized_phone:

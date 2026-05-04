@@ -314,3 +314,21 @@ def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fai
         ("5511999999999", RETURN_TO_BOT_TRANSITION_MESSAGE),
         ("5511999999999", PROACTIVE_MENU_MESSAGE),
     ]
+
+
+def test_notify_operator_handoff_start_sends_alert_to_configured_number(monkeypatch):
+    service = _build_service()
+    object.__setattr__(service.settings, "operator_alert_whatsapp_number", "whatsapp:+5511888887777")
+    sent_payload = []
+    monkeypatch.setattr(
+        service,
+        "send_meta_message",
+        lambda destination, text: sent_payload.append((destination, text)) or True,
+    )
+
+    sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+
+    assert sent is True
+    assert sent_payload
+    assert sent_payload[0][0] == "5511888887777"
+    assert "+5511999999999" in sent_payload[0][1]

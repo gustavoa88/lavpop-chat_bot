@@ -81,6 +81,8 @@ def _phone_log_id(phone: str) -> str:
 
 
 def _message_preview(message: str, limit: int = 80) -> str:
+    if _is_production():
+        return "[redacted]"
     compact = " ".join((message or "").split())
     if len(compact) <= limit:
         return compact

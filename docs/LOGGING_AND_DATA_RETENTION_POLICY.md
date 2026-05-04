@@ -46,6 +46,8 @@ As tabelas abaixo são operacionais e devem manter retenção curta:
 - Registrar data, operador, critérios usados e volume removido.
 - Nunca executar limpeza diretamente em produção sem teste prévio em staging
   quando houver mudança no critério.
+- Preferir `scripts/postgres_retention_cleanup.py` em modo dry-run antes de
+  executar remoção real (`--apply`).
 
 ## Consultas de referência
 

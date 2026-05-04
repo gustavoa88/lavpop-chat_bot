@@ -33,10 +33,11 @@ DEFAULT_ENV = {
 }
 
 
-def _load_main_module(monkeypatch: Any, *, validate_signature: bool, app_secret: str):
+def _load_main_module(monkeypatch: Any, *, validate_signature: bool, app_secret: str, app_env: str = "dev"):
     for key, value in DEFAULT_ENV.items():
         monkeypatch.setenv(key, value)
 
+    monkeypatch.setenv("APP_ENV", app_env)
     monkeypatch.setenv("META_VALIDATE_SIGNATURE", "true" if validate_signature else "false")
     monkeypatch.setenv("META_APP_SECRET", app_secret)
 
@@ -190,6 +191,46 @@ def test_post_webhook_meta_deduplicates_message_id(monkeypatch):
     assert response.json() == {"status": "ok"}
     assert len(answered_messages) == 1
     assert len(sent_messages) == 1
+
+
+def test_post_webhook_meta_redacts_message_preview_in_production_logs(monkeypatch, caplog):
+    main_module = _load_main_module(monkeypatch, validate_signature=False, app_secret="", app_env="production")
+
+    main_module.db.try_register_webhook_event = lambda **kwargs: True
+    main_module.chat_service.answer_message = lambda *args, **kwargs: ("ok", "menu", None, "menu_inicial")
+    main_module.chat_service.send_meta_message = lambda *args, **kwargs: True
+    main_module.chat_service.send_meta_menu_message = lambda *args, **kwargs: True
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Gustavo"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.redacted123",
+                                    "from": "5511912345678",
+                                    "timestamp": "1710000000",
+                                    "type": "text",
+                                    "text": {"body": "meu telefone é 5511912345678"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    caplog.set_level("INFO", logger="meta_chatbot")
+    response = _request(main_module.app, "POST", "/webhook/meta", json=payload)
+
+    assert response.status_code == 200
+    joined_logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "preview=[redacted]" in joined_logs
+    assert "meu telefone é 5511912345678" not in joined_logs
+    assert "phone=5511912345678" not in joined_logs
 
 
 def test_post_webhook_meta_interactive_list_reply_maps_to_menu_option(monkeypatch):

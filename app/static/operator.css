@@ -32,6 +32,8 @@ button, select, textarea { font: inherit; }
   background: #f0f2f5;
 }
 .panel-header h1 { margin: 0; font-size: 32px; color: var(--wa-green); font-weight: 600; }
+.header-title { display: grid; gap: 2px; }
+.queue-alert { margin: 0; font-size: 13px; color: #d93025; font-weight: 600; }
 .panel-header select { border-radius: 18px; border: 1px solid #dfe5e7; padding: 8px 10px; background: #fff; color: var(--wa-muted); }
 
 .list-items { overflow-y: auto; max-height: calc(100vh - 92px); }

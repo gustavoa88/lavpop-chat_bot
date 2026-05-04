@@ -10,7 +10,10 @@
     <main class="operator-shell">
       <aside class="conversation-list">
         <header class="panel-header">
-          <h1>WhatsApp</h1>
+          <div class="header-title">
+            <h1>WhatsApp</h1>
+            <p id="queueAlert" class="queue-alert" hidden>Nenhuma conversa aguardando.</p>
+          </div>
           <select id="modeFilter" aria-label="Filtro de conversas">
             <option value="aguardando_humano">Aguardando</option>
             <option value="humano">Em atendimento</option>

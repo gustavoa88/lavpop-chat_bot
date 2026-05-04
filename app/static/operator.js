@@ -11,6 +11,10 @@ const selectedName = document.getElementById("selectedName");
 const selectedPhone = document.getElementById("selectedPhone");
 const replyForm = document.getElementById("replyForm");
 const replyText = document.getElementById("replyText");
+const queueAlert = document.getElementById("queueAlert");
+const defaultTitle = document.title;
+let pendingConversations = 0;
+let notificationPermissionAsked = false;
 
 function escapeText(value) {
   return String(value || "").replace(/[&<>"']/g, (char) => ({
@@ -40,6 +44,9 @@ async function api(path, options = {}) {
 
 async function loadConversations() {
   const data = await api(`/operator/api/conversations?mode=${encodeURIComponent(state.mode)}`);
+  pendingConversations = data.conversations.length;
+  updateQueueAlert();
+  maybeNotifyNewQueue(pendingConversations);
   conversationList.innerHTML = "";
   for (const item of data.conversations) {
     const button = document.createElement("button");
@@ -53,6 +60,58 @@ async function loadConversations() {
     button.addEventListener("click", () => selectConversation(item));
     conversationList.appendChild(button);
   }
+}
+
+function updateQueueAlert() {
+  if (!queueAlert) {
+    return;
+  }
+  if (pendingConversations > 0) {
+    queueAlert.hidden = false;
+    queueAlert.textContent = `${pendingConversations} conversa(s) aguardando operador`;
+    document.title = `(${pendingConversations}) ${defaultTitle}`;
+    return;
+  }
+  queueAlert.hidden = true;
+  queueAlert.textContent = "Nenhuma conversa aguardando.";
+  document.title = defaultTitle;
+}
+
+function beepAlert() {
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.value = 880;
+  gainNode.gain.value = 0.05;
+  oscillator.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.2);
+}
+
+let lastPendingConversations = 0;
+function maybeNotifyNewQueue(currentPendingConversations) {
+  if (currentPendingConversations <= lastPendingConversations) {
+    lastPendingConversations = currentPendingConversations;
+    return;
+  }
+
+  beepAlert();
+  if (!("Notification" in window)) {
+    lastPendingConversations = currentPendingConversations;
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    new Notification("LavPop Atendimento", {
+      body: `Você tem ${currentPendingConversations} conversa(s) aguardando operador.`,
+    });
+  } else if (Notification.permission === "default" && !notificationPermissionAsked) {
+    notificationPermissionAsked = true;
+    Notification.requestPermission().catch(() => null);
+  }
+  lastPendingConversations = currentPendingConversations;
 }
 
 async function loadMessages() {

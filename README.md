@@ -55,6 +55,7 @@ Preencha:
 - `OBSERVABILITY_INTERNAL_ONLY` (`true`/`false`, padrão: `true`) para restringir `/metrics` e `/health/*` a rede interna
 - `OPERATOR_PANEL_ENABLED` (`true`/`false`, padrão: `false`) para habilitar o painel interno de atendimento humano em `/operator`
 - `OPERATOR_PANEL_TOKEN` para proteger o painel interno quando habilitado
+- `OPERATOR_ALERT_WHATSAPP_NUMBER` para receber alerta de início de atendimento humano (recomendado manter apenas no `.env`)
 - `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
 - `APP_DEBUG_LOG_MODE` (`true`/`false`, padrão: `false`) para habilitar logs detalhados de diagnóstico (payload recebido, decisão do roteador e resposta da Meta)
 - `WEBHOOK_RATE_LIMIT_PER_MINUTE` (padrão: `120`) para limitar chamadas por IP no webhook; use a borda/proxy como proteção principal.

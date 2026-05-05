@@ -159,7 +159,21 @@ def _extract_menu_option_token(message: str) -> str:
         "servicos disponiveis": "4",
         "atendimento humano": "5",
     }
-    return title_to_option.get(compact_no_punct, "")
+    exact_option = title_to_option.get(compact_no_punct, "")
+    if exact_option:
+        return exact_option
+
+    topic_patterns = (
+        ("1", ("horario", "funcionamento", "abre", "fecha")),
+        ("2", ("preco", "precos", "valor", "valores", "custo", "custos", "orcamento")),
+        ("3", ("como funciona", "funciona", "processo", "passo a passo")),
+        ("4", ("servico", "servicos", "lavar", "lavagem", "seca", "secagem")),
+    )
+    for option, terms in topic_patterns:
+        if any(term in compact_no_punct for term in terms):
+            return option
+
+    return ""
 
 
 def normalize_text(text: str) -> str:
@@ -363,7 +377,12 @@ class ChatService:
             "e ai",
             "ei",
         }
-        return msg_norm in simple_greetings
+        if msg_norm in simple_greetings:
+            return True
+
+        greeting_tokens = {"oi", "ola", "bom", "boa", "dia", "tarde", "noite", "e", "ai", "ei"}
+        tokens = msg_norm.split()
+        return bool(tokens) and len(tokens) <= 4 and all(token in greeting_tokens for token in tokens)
 
     def proactive_menu_option_response(
         self, message: str, rules: Optional[list[dict]] = None
@@ -1102,15 +1121,9 @@ class ChatService:
             )
             if option_response:
                 base_source = option_source or "menu"
-                response = self.ai_router_assist_response(
-                    customer_name=name,
-                    user_message=message,
-                    base_response=option_response,
-                    response_origin=base_source,
-                    context=context,
-                )
+                response = option_response
                 source = base_source
-                response_type = f"menu_opcao_{base_source}_com_ia"
+                response_type = f"menu_opcao_{base_source}"
                 intent = option_intent
                 rule_name = option_rule_name
             else:

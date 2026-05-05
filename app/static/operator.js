@@ -42,9 +42,19 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+async function loadPendingConversationCount() {
+  if (state.mode === "aguardando_humano") {
+    return null;
+  }
+
+  const data = await api("/operator/api/conversations?mode=aguardando_humano");
+  return data.conversations.length;
+}
+
 async function loadConversations() {
   const data = await api(`/operator/api/conversations?mode=${encodeURIComponent(state.mode)}`);
-  pendingConversations = data.conversations.length;
+  const pendingCount = await loadPendingConversationCount();
+  pendingConversations = pendingCount === null ? data.conversations.length : pendingCount;
   updateQueueAlert();
   maybeNotifyNewQueue(pendingConversations);
   conversationList.innerHTML = "";

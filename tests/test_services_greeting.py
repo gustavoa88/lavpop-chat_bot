@@ -68,6 +68,31 @@ def test_answer_message_returns_proactive_menu_for_simple_greeting():
     assert intent == "menu_inicial"
 
 
+def test_answer_message_returns_proactive_menu_for_combined_greeting():
+    service = _build_service()
+
+    response, source, rule_name, intent = service.answer_message("5511999999999", "Gustavo", "Olá boa noite")
+
+    assert response == PROACTIVE_MENU_MESSAGE
+    assert source == "menu"
+    assert rule_name is None
+    assert intent == "menu_inicial"
+
+
+def test_cost_question_uses_menu_price_response_without_openai():
+    service = _build_service()
+    service.client = object()
+
+    response, source, rule_name, intent = service.answer_message(
+        "5511999999999", "Gustavo", "Gostaria de saber quais são os custos?"
+    )
+
+    assert response == PROACTIVE_MENU_OPTIONS["2"]["fallback"]
+    assert source == "menu"
+    assert rule_name is None
+    assert intent == "menu_opcao_2"
+
+
 def test_answer_message_keeps_regular_flow_for_non_greeting_message():
     service = _build_service()
 
@@ -75,10 +100,10 @@ def test_answer_message_keeps_regular_flow_for_non_greeting_message():
         "5511999999999", "Gustavo", "qual o horário de atendimento?"
     )
 
-    assert "horário" in response
-    assert source == "ia"
+    assert "Horário" in response
+    assert source == "menu"
     assert rule_name is None
-    assert intent is None
+    assert intent == "menu_opcao_1"
 
 
 def test_answer_message_returns_fixed_response_for_menu_option_1():

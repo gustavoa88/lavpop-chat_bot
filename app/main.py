@@ -370,15 +370,37 @@ def _payload_summary(payload: dict) -> dict[str, int]:
     }
 
 
+def _sanitize_fallback_text(answer: str) -> str:
+    text = (answer or "").strip()
+    compact = " ".join(text.split())
+    if len(compact) > 900:
+        compact = compact[:900].rstrip() + "..."
+    return compact
+
+
 def _send_answer(phone: str, answer: str) -> bool:
     if answer == PROACTIVE_MENU_MESSAGE:
         sent = chat_service.send_meta_menu_message(phone)
         if sent:
             return True
         logger.info("Fallback para mensagem de texto após falha no menu interativo. destino=%s", _phone_log_id(phone))
-        return chat_service.send_meta_message(phone, answer)
+        if chat_service.send_meta_message(phone, answer):
+            return True
+        compact_menu = _sanitize_fallback_text(answer)
+        if compact_menu and compact_menu != answer:
+            logger.info("Fallback adicional com texto compacto após falha no envio do menu. destino=%s", _phone_log_id(phone))
+            return chat_service.send_meta_message(phone, compact_menu)
+        return False
 
-    return chat_service.send_meta_message(phone, answer)
+    if chat_service.send_meta_message(phone, answer):
+        return True
+
+    compact_answer = _sanitize_fallback_text(answer)
+    if compact_answer and compact_answer != answer:
+        logger.info("Fallback com texto compacto após falha no envio. destino=%s", _phone_log_id(phone))
+        return chat_service.send_meta_message(phone, compact_answer)
+
+    return False
 
 
 def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> str:

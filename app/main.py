@@ -525,6 +525,11 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
             )
             return "send_failed"
 
+        _best_effort_persistence(
+            "notify_operator_handoff_start",
+            lambda: chat_service.notify_operator_handoff_start(phone),
+        )
+
         observability_state.mark_response_source("roteador")
         logger.info(
             "Conversa roteada para humano. event_key=%s phone=%s mode=%s reason=%s",

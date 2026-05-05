@@ -1,3 +1,6 @@
+import json
+from urllib.error import HTTPError
+
 from app.config import Settings
 from app.services import (
     ChatService,
@@ -319,6 +322,7 @@ def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fai
 def test_notify_operator_handoff_start_sends_alert_to_configured_number(monkeypatch):
     service = _build_service()
     object.__setattr__(service.settings, "operator_alert_whatsapp_number", "whatsapp:+5511888887777")
+    object.__setattr__(service.settings, "operator_alert_template_name", "")
     sent_payload = []
     monkeypatch.setattr(
         service,
@@ -332,3 +336,115 @@ def test_notify_operator_handoff_start_sends_alert_to_configured_number(monkeypa
     assert sent_payload
     assert sent_payload[0][0] == "5511888887777"
     assert "+5511999999999" in sent_payload[0][1]
+
+
+def test_notify_operator_handoff_start_sends_template_to_configured_number(monkeypatch):
+    service = _build_service()
+    object.__setattr__(service.settings, "operator_alert_whatsapp_number", "+5511888887777")
+    object.__setattr__(service.settings, "operator_alert_template_name", "operator_handoff_alert")
+    object.__setattr__(service.settings, "operator_alert_template_language", "pt_BR")
+    sent_templates = []
+    monkeypatch.setattr(
+        service,
+        "send_meta_template_message",
+        lambda destination, template, language, params: sent_templates.append(
+            (destination, template, language, params)
+        )
+        or True,
+    )
+
+    sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+
+    assert sent is True
+    assert sent_templates == [
+        ("5511888887777", "operator_handoff_alert", "pt_BR", ["+5511999999999"])
+    ]
+
+
+def test_notify_operator_handoff_start_returns_false_without_operator_number(caplog):
+    service = _build_service()
+
+    sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+
+    assert sent is False
+    assert "OPERATOR_ALERT_WHATSAPP_NUMBER nao configurado" in caplog.text
+
+
+def test_send_meta_template_message_posts_expected_payload(monkeypatch):
+    service = _build_service()
+    object.__setattr__(service.settings, "meta_whatsapp_token", "EA" + ("x" * 25))
+    object.__setattr__(service.settings, "meta_phone_number_id", "123456")
+    requests = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"messages":[{"id":"wamid.test"}]}'
+
+    def fake_urlopen(req, timeout):
+        requests.append((req, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    sent = service.send_meta_template_message(
+        "+5511888887777",
+        "operator_handoff_alert",
+        "pt_BR",
+        ["+5511999999999"],
+    )
+
+    assert sent is True
+    req, timeout = requests[0]
+    assert timeout == 10
+    assert req.full_url == "https://graph.facebook.com/v23.0/123456/messages"
+    assert req.headers["Authorization"] == "Bearer EAxxxxxxxxxxxxxxxxxxxxxxxxx"
+    payload = json.loads(req.data.decode("utf-8"))
+    assert payload == {
+        "messaging_product": "whatsapp",
+        "to": "5511888887777",
+        "type": "template",
+        "template": {
+            "name": "operator_handoff_alert",
+            "language": {"code": "pt_BR"},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": "+5511999999999"}],
+                }
+            ],
+        },
+    }
+
+
+def test_send_meta_template_message_returns_false_on_http_error(monkeypatch):
+    service = _build_service()
+    object.__setattr__(service.settings, "meta_whatsapp_token", "EA" + ("x" * 25))
+    object.__setattr__(service.settings, "meta_phone_number_id", "123456")
+
+    def fake_urlopen(req, timeout):
+        raise HTTPError(
+            req.full_url,
+            400,
+            "Bad Request",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    sent = service.send_meta_template_message(
+        "+5511888887777",
+        "operator_handoff_alert",
+        "pt_BR",
+        ["+5511999999999"],
+    )
+
+    assert sent is False

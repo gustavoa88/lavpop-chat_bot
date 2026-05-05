@@ -799,9 +799,20 @@ class ChatService:
         destination = normalize_phone(self.settings.operator_alert_whatsapp_number)
         normalized_customer_phone = normalize_phone(customer_phone)
         if not destination:
+            logger.warning("Alerta de operador ignorado: OPERATOR_ALERT_WHATSAPP_NUMBER nao configurado.")
             return False
         if not normalized_customer_phone:
             raise ValueError("Telefone do cliente é obrigatório.")
+
+        template_name = (self.settings.operator_alert_template_name or "").strip()
+        template_language = (self.settings.operator_alert_template_language or "pt_BR").strip()
+        if template_name:
+            return self.send_meta_template_message(
+                destination,
+                template_name,
+                template_language,
+                [f"+{normalized_customer_phone}"],
+            )
 
         message = (
             "🔔 Novo atendimento humano iniciado no painel.\n"
@@ -809,6 +820,118 @@ class ChatService:
             "Acesse o painel para assumir ou continuar o atendimento."
         )
         return self.send_meta_message(destination, message)
+
+    def send_meta_template_message(
+        self,
+        destination: str,
+        template_name: str,
+        language_code: str,
+        body_params: list[str] | tuple[str, ...] = (),
+    ) -> bool:
+        normalized_destination = normalize_phone(destination)
+        template_name = (template_name or "").strip()
+        language_code = (language_code or "pt_BR").strip()
+        if not normalized_destination:
+            logger.error("Envio de template Meta ignorado por destino vazio após normalização.")
+            return False
+        if not template_name:
+            logger.error("Envio de template Meta ignorado por nome de template vazio.")
+            return False
+        if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
+            logger.error(
+                "Envio de template Meta ignorado por configuração ausente. token=%s phone_number_id=%s",
+                _token_hint(self.settings.meta_whatsapp_token),
+                "ok" if self.settings.meta_phone_number_id else "ausente",
+            )
+            return False
+
+        now = time.time()
+        if now < self._meta_send_blocked_until:
+            logger.warning(
+                "Envio de template Meta temporariamente desabilitado por erro de autenticação anterior. destino=%s",
+                _phone_log_id(normalized_destination),
+            )
+            return False
+
+        components = []
+        if body_params:
+            components.append(
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": str(param)}
+                        for param in body_params
+                    ],
+                }
+            )
+
+        url = f"https://graph.facebook.com/v23.0/{self.settings.meta_phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": normalized_destination,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": language_code},
+            },
+        }
+        if components:
+            payload["template"]["components"] = components
+
+        self._debug_log(
+            "Tentativa envio Meta template. destino=%s endpoint_phone_number_id=%s template=%s language=%s",
+            _phone_log_id(normalized_destination),
+            self.settings.meta_phone_number_id or "ausente",
+            template_name,
+            language_code,
+        )
+
+        req = urllib.request.Request(
+            url=url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.settings.meta_whatsapp_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+                self._debug_log(
+                    "Resposta Meta template success. status=%s body=%s",
+                    getattr(response, "status", "n/a"),
+                    response_body[:400],
+                )
+                logger.info("Template Meta enviado com sucesso para %s", _phone_log_id(normalized_destination))
+                return True
+        except HTTPError as exc:
+            details = _http_error_body(exc)
+            if exc.code in {401, 403}:
+                self._meta_send_blocked_until = time.time() + 300
+                logger.error(
+                    "Erro de autenticação Meta (code=%s). Verifique META_WHATSAPP_TOKEN "
+                    "e META_PHONE_NUMBER_ID.",
+                    exc.code,
+                )
+            logger.error(
+                "Falha HTTP ao enviar template Meta. code=%s destino=%s template=%s detalhe=%s",
+                exc.code,
+                _phone_log_id(normalized_destination),
+                template_name,
+                details or "-",
+            )
+            self._debug_log("HTTPError Meta template payload=%s", json.dumps(payload, ensure_ascii=False)[:400])
+            return False
+        except (URLError, TimeoutError) as exc:
+            logger.error(
+                "Falha de rede ao enviar template Meta. destino=%s template=%s erro=%s",
+                _phone_log_id(normalized_destination),
+                template_name,
+                exc,
+            )
+            return False
 
     def return_conversation_to_bot(self, phone: str) -> dict[str, bool | str]:
         normalized_phone = normalize_phone(phone)

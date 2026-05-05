@@ -56,6 +56,7 @@ Preencha:
 - `OPERATOR_PANEL_ENABLED` (`true`/`false`, padrão: `false`) para habilitar o painel interno de atendimento humano em `/operator`
 - `OPERATOR_PANEL_TOKEN` para proteger o painel interno quando habilitado
 - `OPERATOR_ALERT_WHATSAPP_NUMBER` para receber alerta de início de atendimento humano (recomendado manter apenas no `.env`)
+- `OPERATOR_ALERT_TEMPLATE_NAME` e `OPERATOR_ALERT_TEMPLATE_LANGUAGE` para enviar o alerta ao operador por template aprovado da Meta
 - `APP_ENV` (`dev`/`prod`/`production`; em produção ativa regras estritas de segurança)
 - `APP_DEBUG_LOG_MODE` (`true`/`false`, padrão: `false`) para habilitar logs detalhados de diagnóstico (payload recebido, decisão do roteador e resposta da Meta)
 - `WEBHOOK_RATE_LIMIT_PER_MINUTE` (padrão: `120`) para limitar chamadas por IP no webhook; use a borda/proxy como proteção principal.
@@ -357,7 +358,22 @@ Configuração mínima:
 ```bash
 OPERATOR_PANEL_ENABLED=true
 OPERATOR_PANEL_TOKEN=troque-este-token
+OPERATOR_ALERT_WHATSAPP_NUMBER=+5511941878601
+OPERATOR_ALERT_TEMPLATE_NAME=operator_handoff_alert
+OPERATOR_ALERT_TEMPLATE_LANGUAGE=pt_BR
 ```
+
+Para avisar um operador por WhatsApp fora da janela de 24 horas, crie e aprove
+na Meta um template de utilidade com o nome configurado em
+`OPERATOR_ALERT_TEMPLATE_NAME`. Sugestão de corpo do template:
+
+```text
+Novo atendimento humano iniciado. Cliente: {{1}}. Acesse o painel LavPop para assumir ou continuar o atendimento.
+```
+
+Mensagens de texto livre para o número do operador só são confiáveis quando esse
+número já abriu uma janela de atendimento com o WhatsApp comercial nas últimas
+24 horas.
 
 Acesso inicial:
 

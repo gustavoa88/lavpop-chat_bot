@@ -525,10 +525,22 @@ def _handle_meta_message_event(event: ParsedMessageEvent, payload_hash: str) -> 
             )
             return "send_failed"
 
-        _best_effort_persistence(
+        operator_alert_sent = _best_effort_persistence(
             "notify_operator_handoff_start",
             lambda: chat_service.notify_operator_handoff_start(phone),
         )
+        if operator_alert_sent:
+            logger.info(
+                "Alerta de handoff enviado ao operador. event_key=%s phone=%s",
+                event_key,
+                phone_log_id,
+            )
+        else:
+            logger.warning(
+                "Alerta de handoff nao enviado ao operador. event_key=%s phone=%s",
+                event_key,
+                phone_log_id,
+            )
 
         observability_state.mark_response_source("roteador")
         logger.info(

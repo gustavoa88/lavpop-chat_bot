@@ -32,6 +32,8 @@ class Settings:
     operator_panel_enabled: bool = False
     operator_panel_token: str = ""
     operator_alert_whatsapp_number: str = ""
+    operator_alert_template_name: str = "operator_handoff_alert"
+    operator_alert_template_language: str = "pt_BR"
     app_env: str = "dev"
 
 
@@ -136,5 +138,13 @@ def load_settings() -> Settings:
         operator_panel_enabled=operator_panel_enabled,
         operator_panel_token=os.getenv("OPERATOR_PANEL_TOKEN", "").strip(),
         operator_alert_whatsapp_number=os.getenv("OPERATOR_ALERT_WHATSAPP_NUMBER", "").strip(),
+        operator_alert_template_name=os.getenv(
+            "OPERATOR_ALERT_TEMPLATE_NAME",
+            "operator_handoff_alert",
+        ).strip(),
+        operator_alert_template_language=os.getenv(
+            "OPERATOR_ALERT_TEMPLATE_LANGUAGE",
+            "pt_BR",
+        ).strip(),
         app_env=os.getenv("APP_ENV", os.getenv("ENV", "dev")).strip().lower(),
     )

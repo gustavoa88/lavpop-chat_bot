@@ -89,6 +89,16 @@ def test_load_settings_reads_webhook_rate_limit_from_env(monkeypatch):
     assert settings.webhook_rate_limit_per_minute == 60
 
 
+def test_load_settings_reads_operator_alert_template_from_env(monkeypatch):
+    monkeypatch.setenv("OPERATOR_ALERT_TEMPLATE_NAME", "alerta_operador")
+    monkeypatch.setenv("OPERATOR_ALERT_TEMPLATE_LANGUAGE", "pt_BR")
+
+    settings = load_settings()
+
+    assert settings.operator_alert_template_name == "alerta_operador"
+    assert settings.operator_alert_template_language == "pt_BR"
+
+
 def test_load_settings_uses_database_url_when_present(monkeypatch):
     monkeypatch.setenv(
         "DATABASE_URL",

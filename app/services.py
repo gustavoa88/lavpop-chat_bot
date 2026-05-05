@@ -627,6 +627,7 @@ class ChatService:
             SELECT telefone, COALESCE(nome, '') AS nome
               FROM chatbot.contexto_cliente
              WHERE status = 'ativo'
+               AND modo_conversa = 'bot'
                AND ultima_interacao <= NOW() - make_interval(mins => %s)
              ORDER BY ultima_interacao ASC
              LIMIT %s

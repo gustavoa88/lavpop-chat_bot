@@ -1,0 +1,361 @@
+diff --git a/app/services.py b/app/services.py
+index d97c8aec9d281c69180015552b3625ad7aadae18..68cdba726e1a549da0e70a9ee09d018de3098e2a 100644
+--- a/app/services.py
++++ b/app/services.py
+@@ -785,56 +785,65 @@ class ChatService:
+             client_msg="[atendente]",
+             bot_msg=normalized_text,
+             source="humano",
+             rule_name="atendimento_humano",
+         )
+         self.set_operator_conversation_mode(
+             normalized_phone,
+             "humano",
+             "resposta_humana",
+             status="ativo",
+         )
+         return sent
+ 
+     def notify_operator_handoff_start(self, customer_phone: str) -> bool:
+         destination = normalize_phone(self.settings.operator_alert_whatsapp_number)
+         normalized_customer_phone = normalize_phone(customer_phone)
+         if not destination:
+             logger.warning("Alerta de operador ignorado: OPERATOR_ALERT_WHATSAPP_NUMBER nao configurado.")
+             return False
+         if not normalized_customer_phone:
+             raise ValueError("Telefone do cliente é obrigatório.")
+ 
+         template_name = (self.settings.operator_alert_template_name or "").strip()
+         template_language = (self.settings.operator_alert_template_language or "pt_BR").strip()
+         if template_name:
+-            return self.send_meta_template_message(
++            template_sent = self.send_meta_template_message(
+                 destination,
+                 template_name,
+                 template_language,
+                 [f"+{normalized_customer_phone}"],
+             )
++            if template_sent:
++                return True
++
++            logger.warning(
++                "Falha no envio de template de alerta ao operador. Aplicando fallback em texto. template=%s destino=%s cliente=%s",
++                template_name,
++                _phone_log_id(destination),
++                _phone_log_id(normalized_customer_phone),
++            )
+ 
+         message = (
+             "🔔 Novo atendimento humano iniciado no painel.\n"
+             f"Cliente: +{normalized_customer_phone}\n"
+             "Acesse o painel para assumir ou continuar o atendimento."
+         )
+         return self.send_meta_message(destination, message)
+ 
+     def send_meta_template_message(
+         self,
+         destination: str,
+         template_name: str,
+         language_code: str,
+         body_params: list[str] | tuple[str, ...] = (),
+     ) -> bool:
+         normalized_destination = normalize_phone(destination)
+         template_name = (template_name or "").strip()
+         language_code = (language_code or "pt_BR").strip()
+         if not normalized_destination:
+             logger.error("Envio de template Meta ignorado por destino vazio após normalização.")
+             return False
+         if not template_name:
+             logger.error("Envio de template Meta ignorado por nome de template vazio.")
+             return False
+         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
+diff --git a/tests/test_services_core.py b/tests/test_services_core.py
+index 4ceab0ae3e88adeea8e089d40d7a23daf2868fb4..f4369a34d86b4935d434358f13dfd787b7e32b5f 100644
+--- a/tests/test_services_core.py
++++ b/tests/test_services_core.py
+@@ -310,79 +310,104 @@ def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fai
+     monkeypatch.setattr(service, "save_message", lambda *args, **kwargs: None)
+     monkeypatch.setattr(service, "save_log", lambda *args, **kwargs: None)
+ 
+     result = service.return_conversation_to_bot("5511999999999")
+ 
+     assert result["menu_sent"] is True
+     assert sent_texts == [
+         ("5511999999999", RETURN_TO_BOT_TRANSITION_MESSAGE),
+         ("5511999999999", PROACTIVE_MENU_MESSAGE),
+     ]
+ 
+ 
+ def test_notify_operator_handoff_start_sends_alert_to_configured_number(monkeypatch):
+     service = _build_service()
+     object.__setattr__(service.settings, "operator_alert_whatsapp_number", "whatsapp:+5511888887777")
+     object.__setattr__(service.settings, "operator_alert_template_name", "")
+     sent_payload = []
+     monkeypatch.setattr(
+         service,
+         "send_meta_message",
+         lambda destination, text: sent_payload.append((destination, text)) or True,
+     )
+ 
+     sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+ 
++    assert "Aplicando fallback em texto" in caplog.text
+     assert sent is True
+     assert sent_payload
+     assert sent_payload[0][0] == "5511888887777"
+     assert "+5511999999999" in sent_payload[0][1]
+ 
+ 
+ def test_notify_operator_handoff_start_sends_template_to_configured_number(monkeypatch):
+     service = _build_service()
+     object.__setattr__(service.settings, "operator_alert_whatsapp_number", "+5511888887777")
+     object.__setattr__(service.settings, "operator_alert_template_name", "operator_handoff_alert")
+     object.__setattr__(service.settings, "operator_alert_template_language", "pt_BR")
+     sent_templates = []
+     monkeypatch.setattr(
+         service,
+         "send_meta_template_message",
+         lambda destination, template, language, params: sent_templates.append(
+             (destination, template, language, params)
+         )
+         or True,
+     )
+ 
+     sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+ 
++    assert "Aplicando fallback em texto" in caplog.text
+     assert sent is True
+     assert sent_templates == [
+         ("5511888887777", "operator_handoff_alert", "pt_BR", ["+5511999999999"])
+     ]
+ 
+ 
++def test_notify_operator_handoff_start_falls_back_to_text_when_template_fails(monkeypatch, caplog):
++    service = _build_service()
++    object.__setattr__(service.settings, "operator_alert_whatsapp_number", "+5511888887777")
++    object.__setattr__(service.settings, "operator_alert_template_name", "operator_handoff_alert")
++    object.__setattr__(service.settings, "operator_alert_template_language", "pt_BR")
++
++    monkeypatch.setattr(service, "send_meta_template_message", lambda *args, **kwargs: False)
++    sent_messages = []
++    monkeypatch.setattr(
++        service,
++        "send_meta_message",
++        lambda destination, text: sent_messages.append((destination, text)) or True,
++    )
++
++    sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
++
++    assert "Aplicando fallback em texto" in caplog.text
++    assert sent is True
++    assert sent_messages
++    assert sent_messages[0][0] == "5511888887777"
++    assert "+5511999999999" in sent_messages[0][1]
++
++
+ def test_notify_operator_handoff_start_returns_false_without_operator_number(caplog):
+     service = _build_service()
+ 
+     sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+ 
+     assert sent is False
+     assert "OPERATOR_ALERT_WHATSAPP_NUMBER nao configurado" in caplog.text
+ 
+ 
+ def test_send_meta_template_message_posts_expected_payload(monkeypatch):
+     service = _build_service()
+     object.__setattr__(service.settings, "meta_whatsapp_token", "EA" + ("x" * 25))
+     object.__setattr__(service.settings, "meta_phone_number_id", "123456")
+     requests = []
+ 
+     class FakeResponse:
+         status = 200
+ 
+         def __enter__(self):
+             return self
+ 
+         def __exit__(self, exc_type, exc, tb):
+             return False
+ 
+         def read(self):
+diff --git a/app/services.py b/app/services.py
+index d97c8aec9d281c69180015552b3625ad7aadae18..68cdba726e1a549da0e70a9ee09d018de3098e2a 100644
+--- a/app/services.py
++++ b/app/services.py
+@@ -785,56 +785,65 @@ class ChatService:
+             client_msg="[atendente]",
+             bot_msg=normalized_text,
+             source="humano",
+             rule_name="atendimento_humano",
+         )
+         self.set_operator_conversation_mode(
+             normalized_phone,
+             "humano",
+             "resposta_humana",
+             status="ativo",
+         )
+         return sent
+ 
+     def notify_operator_handoff_start(self, customer_phone: str) -> bool:
+         destination = normalize_phone(self.settings.operator_alert_whatsapp_number)
+         normalized_customer_phone = normalize_phone(customer_phone)
+         if not destination:
+             logger.warning("Alerta de operador ignorado: OPERATOR_ALERT_WHATSAPP_NUMBER nao configurado.")
+             return False
+         if not normalized_customer_phone:
+             raise ValueError("Telefone do cliente é obrigatório.")
+ 
+         template_name = (self.settings.operator_alert_template_name or "").strip()
+         template_language = (self.settings.operator_alert_template_language or "pt_BR").strip()
+         if template_name:
+-            return self.send_meta_template_message(
++            template_sent = self.send_meta_template_message(
+                 destination,
+                 template_name,
+                 template_language,
+                 [f"+{normalized_customer_phone}"],
+             )
++            if template_sent:
++                return True
++
++            logger.warning(
++                "Falha no envio de template de alerta ao operador. Aplicando fallback em texto. template=%s destino=%s cliente=%s",
++                template_name,
++                _phone_log_id(destination),
++                _phone_log_id(normalized_customer_phone),
++            )
+ 
+         message = (
+             "🔔 Novo atendimento humano iniciado no painel.\n"
+             f"Cliente: +{normalized_customer_phone}\n"
+             "Acesse o painel para assumir ou continuar o atendimento."
+         )
+         return self.send_meta_message(destination, message)
+ 
+     def send_meta_template_message(
+         self,
+         destination: str,
+         template_name: str,
+         language_code: str,
+         body_params: list[str] | tuple[str, ...] = (),
+     ) -> bool:
+         normalized_destination = normalize_phone(destination)
+         template_name = (template_name or "").strip()
+         language_code = (language_code or "pt_BR").strip()
+         if not normalized_destination:
+             logger.error("Envio de template Meta ignorado por destino vazio após normalização.")
+             return False
+         if not template_name:
+             logger.error("Envio de template Meta ignorado por nome de template vazio.")
+             return False
+         if not self.settings.meta_whatsapp_token or not self.settings.meta_phone_number_id:
+diff --git a/tests/test_services_core.py b/tests/test_services_core.py
+index 4ceab0ae3e88adeea8e089d40d7a23daf2868fb4..f4369a34d86b4935d434358f13dfd787b7e32b5f 100644
+--- a/tests/test_services_core.py
++++ b/tests/test_services_core.py
+@@ -310,79 +310,104 @@ def test_return_conversation_to_bot_falls_back_to_text_menu_when_interactive_fai
+     monkeypatch.setattr(service, "save_message", lambda *args, **kwargs: None)
+     monkeypatch.setattr(service, "save_log", lambda *args, **kwargs: None)
+ 
+     result = service.return_conversation_to_bot("5511999999999")
+ 
+     assert result["menu_sent"] is True
+     assert sent_texts == [
+         ("5511999999999", RETURN_TO_BOT_TRANSITION_MESSAGE),
+         ("5511999999999", PROACTIVE_MENU_MESSAGE),
+     ]
+ 
+ 
+ def test_notify_operator_handoff_start_sends_alert_to_configured_number(monkeypatch):
+     service = _build_service()
+     object.__setattr__(service.settings, "operator_alert_whatsapp_number", "whatsapp:+5511888887777")
+     object.__setattr__(service.settings, "operator_alert_template_name", "")
+     sent_payload = []
+     monkeypatch.setattr(
+         service,
+         "send_meta_message",
+         lambda destination, text: sent_payload.append((destination, text)) or True,
+     )
+ 
+     sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+ 
++    assert "Aplicando fallback em texto" in caplog.text
+     assert sent is True
+     assert sent_payload
+     assert sent_payload[0][0] == "5511888887777"
+     assert "+5511999999999" in sent_payload[0][1]
+ 
+ 
+ def test_notify_operator_handoff_start_sends_template_to_configured_number(monkeypatch):
+     service = _build_service()
+     object.__setattr__(service.settings, "operator_alert_whatsapp_number", "+5511888887777")
+     object.__setattr__(service.settings, "operator_alert_template_name", "operator_handoff_alert")
+     object.__setattr__(service.settings, "operator_alert_template_language", "pt_BR")
+     sent_templates = []
+     monkeypatch.setattr(
+         service,
+         "send_meta_template_message",
+         lambda destination, template, language, params: sent_templates.append(
+             (destination, template, language, params)
+         )
+         or True,
+     )
+ 
+     sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+ 
++    assert "Aplicando fallback em texto" in caplog.text
+     assert sent is True
+     assert sent_templates == [
+         ("5511888887777", "operator_handoff_alert", "pt_BR", ["+5511999999999"])
+     ]
+ 
+ 
++def test_notify_operator_handoff_start_falls_back_to_text_when_template_fails(monkeypatch, caplog):
++    service = _build_service()
++    object.__setattr__(service.settings, "operator_alert_whatsapp_number", "+5511888887777")
++    object.__setattr__(service.settings, "operator_alert_template_name", "operator_handoff_alert")
++    object.__setattr__(service.settings, "operator_alert_template_language", "pt_BR")
++
++    monkeypatch.setattr(service, "send_meta_template_message", lambda *args, **kwargs: False)
++    sent_messages = []
++    monkeypatch.setattr(
++        service,
++        "send_meta_message",
++        lambda destination, text: sent_messages.append((destination, text)) or True,
++    )
++
++    sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
++
++    assert "Aplicando fallback em texto" in caplog.text
++    assert sent is True
++    assert sent_messages
++    assert sent_messages[0][0] == "5511888887777"
++    assert "+5511999999999" in sent_messages[0][1]
++
++
+ def test_notify_operator_handoff_start_returns_false_without_operator_number(caplog):
+     service = _build_service()
+ 
+     sent = service.notify_operator_handoff_start("whatsapp:+5511999999999")
+ 
+     assert sent is False
+     assert "OPERATOR_ALERT_WHATSAPP_NUMBER nao configurado" in caplog.text
+ 
+ 
+ def test_send_meta_template_message_posts_expected_payload(monkeypatch):
+     service = _build_service()
+     object.__setattr__(service.settings, "meta_whatsapp_token", "EA" + ("x" * 25))
+     object.__setattr__(service.settings, "meta_phone_number_id", "123456")
+     requests = []
+ 
+     class FakeResponse:
+         status = 200
+ 
+         def __enter__(self):
+             return self
+ 
+         def __exit__(self, exc_type, exc, tb):
+             return False
+ 
+         def read(self):
+
